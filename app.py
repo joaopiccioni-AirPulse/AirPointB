@@ -354,7 +354,7 @@ st.markdown("Compare preços em dinheiro vs. pontos e milhas")
 st.divider()
 
 # Tabs principais
-tab1, tab2, tab3, tab4 = st.tabs(["🔍 Nova Busca", "📊 Resultados", "🎯 Comparador Milhas", "🛫 Aeroportos"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 Nova Busca", "📊 Resultados", "🎫 Buscar Milhas", "🎯 Comparador", "🛫 Aeroportos"])
 
 # ============================================
 # TAB 1: NOVA BUSCA
@@ -507,9 +507,223 @@ with tab2:
         st.info("Faça uma busca na aba 'Nova Busca'.")
 
 # ============================================
-# TAB 3: COMPARADOR DE MILHAS
+# TAB 3: BUSCAR MILHAS (Semi-automatizado)
 # ============================================
 with tab3:
+    st.subheader("🎫 Buscar Disponibilidade de Milhas")
+    st.markdown("Use o **Seats.aero Assistant** para encontrar award seats disponíveis")
+    
+    st.divider()
+    
+    # Passo 1: Definir busca
+    st.markdown("### 1️⃣ Defina sua busca")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        busca_origem_milhas = st.text_input("Origem (código IATA)", value="GRU", max_chars=3, key="milhas_origem").upper()
+    with col2:
+        busca_destino_milhas = st.text_input("Destino (código IATA)", value="MIA", max_chars=3, key="milhas_destino").upper()
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        data_inicio_milhas = st.date_input(
+            "Data inicial",
+            value=date.today() + timedelta(days=30),
+            min_value=date.today() + timedelta(days=1),
+            key="milhas_data_inicio"
+        )
+    with col4:
+        data_fim_milhas = st.date_input(
+            "Data final (opcional)",
+            value=data_inicio_milhas + timedelta(days=7),
+            min_value=data_inicio_milhas,
+            key="milhas_data_fim"
+        )
+    
+    col5, col6 = st.columns(2)
+    with col5:
+        cabines = st.multiselect(
+            "Cabines",
+            ["Economy", "Premium Economy", "Business", "First"],
+            default=["Economy", "Business"],
+            key="milhas_cabines"
+        )
+    with col6:
+        programas_preferidos = st.multiselect(
+            "Programas preferidos (opcional)",
+            ["Smiles", "AAdvantage", "United MileagePlus", "Delta SkyMiles", "Azul", "Air Canada Aeroplan", "Flying Blue", "Emirates", "Etihad"],
+            default=[],
+            key="milhas_programas"
+        )
+    
+    st.divider()
+    
+    # Passo 2: Gerar prompt
+    st.markdown("### 2️⃣ Copie o prompt para o Seats.aero Assistant")
+    
+    # Monta cidade de origem/destino se disponível
+    origem_nome = AIRPORTS.get(busca_origem_milhas, {}).get("cidade", busca_origem_milhas)
+    destino_nome = AIRPORTS.get(busca_destino_milhas, {}).get("cidade", busca_destino_milhas)
+    
+    # Formata datas
+    data_inicio_str = data_inicio_milhas.strftime("%d/%m/%Y")
+    data_fim_str = data_fim_milhas.strftime("%d/%m/%Y")
+    
+    # Monta lista de cabines
+    cabines_str = ", ".join(cabines) if cabines else "Economy e Business"
+    
+    # Monta prompt otimizado
+    prompt_base = f"""Busque disponibilidade de passagens award de {busca_origem_milhas} ({origem_nome}) para {busca_destino_milhas} ({destino_nome}).
+
+Período: {data_inicio_str} a {data_fim_str}
+Cabines: {cabines_str}
+"""
+    
+    if programas_preferidos:
+        prompt_base += f"Programas preferidos: {', '.join(programas_preferidos)}\n"
+    
+    prompt_base += """
+Por favor, liste as opções disponíveis com:
+- Programa de milhas
+- Data do voo
+- Quantidade de milhas necessárias
+- Classe (Economy/Business/First)
+- Companhia aérea operadora
+- Se é voo direto ou com conexão
+- Quantidade de assentos disponíveis (se souber)
+
+Ordene do menor para o maior custo em milhas."""
+
+    st.code(prompt_base, language=None)
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        st.markdown(
+            f'<a href="https://seats.aero/assistant" target="_blank">'
+            f'<button style="background-color:#FF6B6B;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;width:100%">'
+            f'🚀 Abrir Seats.aero Assistant</button></a>',
+            unsafe_allow_html=True
+        )
+    with col_btn2:
+        if st.button("📋 Copiar Prompt", use_container_width=True):
+            st.toast("Use Ctrl+C para copiar o texto acima!")
+    
+    st.divider()
+    
+    # Passo 3: Colar resultado
+    st.markdown("### 3️⃣ Cole o resultado do Assistant")
+    st.caption("Após receber a resposta do Seats.aero Assistant, cole aqui:")
+    
+    resultado_assistant = st.text_area(
+        "Resultado do Seats.aero Assistant",
+        height=200,
+        placeholder="Cole aqui a resposta completa do Seats.aero Assistant...",
+        key="resultado_seats"
+    )
+    
+    # Passo 4: Processar e comparar
+    if resultado_assistant:
+        st.divider()
+        st.markdown("### 4️⃣ Análise e Comparação")
+        
+        # Tenta extrair dados do resultado (parsing básico)
+        st.markdown("#### 📊 Dados extraídos:")
+        
+        # Exibe o resultado formatado
+        st.info(resultado_assistant)
+        
+        # Busca preço cash para comparação
+        df = load_flight_data()
+        if df is not None and len(df) > 0:
+            df_rota = df[(df['Origem'] == busca_origem_milhas) & (df['Destino'] == busca_destino_milhas)]
+            
+            if len(df_rota) > 0:
+                st.markdown("#### 💵 Preços em dinheiro (para comparação):")
+                
+                for classe in df_rota['Classe'].unique():
+                    df_classe = df_rota[df_rota['Classe'] == classe]
+                    if len(df_classe) > 0:
+                        menor_preco = df_classe['Preço BRL'].min()
+                        st.metric(
+                            label=f"{classe}",
+                            value=f"R$ {menor_preco:,.2f}",
+                            help="Menor preço encontrado em dinheiro"
+                        )
+                
+                st.divider()
+                
+                # Calculadora manual
+                st.markdown("#### 🧮 Calculadora de Valor")
+                st.caption("Insira os dados de uma opção em milhas para calcular se vale a pena:")
+                
+                col_calc1, col_calc2, col_calc3 = st.columns(3)
+                with col_calc1:
+                    milhas_necessarias = st.number_input("Milhas necessárias", min_value=0, value=30000, step=1000)
+                with col_calc2:
+                    custo_por_mil = st.number_input("Seu custo por 1.000 milhas (R$)", min_value=0.0, value=20.0, step=1.0)
+                with col_calc3:
+                    preco_cash_comparar = st.number_input("Preço em dinheiro (R$)", min_value=0.0, value=float(df_rota['Preço BRL'].min()), step=100.0)
+                
+                if milhas_necessarias > 0 and preco_cash_comparar > 0:
+                    custo_total_milhas = (milhas_necessarias / 1000) * custo_por_mil
+                    valor_por_milha = (preco_cash_comparar / milhas_necessarias) * 1000
+                    economia = preco_cash_comparar - custo_total_milhas
+                    economia_percent = (economia / preco_cash_comparar) * 100
+                    
+                    st.divider()
+                    
+                    col_res1, col_res2, col_res3 = st.columns(3)
+                    with col_res1:
+                        st.metric("Custo com milhas", f"R$ {custo_total_milhas:,.2f}")
+                    with col_res2:
+                        st.metric("Valor por 1k milhas", f"R$ {valor_por_milha:.2f}")
+                    with col_res3:
+                        if economia > 0:
+                            st.metric("Economia", f"R$ {economia:,.2f}", f"{economia_percent:.0f}%")
+                        else:
+                            st.metric("Prejuízo", f"R$ {abs(economia):,.2f}", f"{economia_percent:.0f}%", delta_color="inverse")
+                    
+                    if economia > 0:
+                        st.success(f"✅ **Vale usar milhas!** Você economiza R$ {economia:,.2f} ({economia_percent:.0f}%)")
+                    else:
+                        st.warning(f"💵 **Pague em dinheiro.** Usar milhas custaria R$ {abs(economia):,.2f} a mais.")
+            else:
+                st.info(f"💡 Faça uma busca de voos cash para {busca_origem_milhas} → {busca_destino_milhas} na aba 'Nova Busca' para comparar preços.")
+        else:
+            st.info("💡 Faça uma busca de voos na aba 'Nova Busca' para comparar preços em dinheiro.")
+    
+    st.divider()
+    
+    # Dicas
+    with st.expander("💡 Dicas para usar o Seats.aero Assistant"):
+        st.markdown("""
+        **Como obter melhores resultados:**
+        
+        1. **Seja específico** - Inclua datas exatas e cabines desejadas
+        2. **Flexibilidade** - Pergunte por datas alternativas próximas
+        3. **Programas múltiplos** - O Assistant pode comparar vários programas
+        4. **Conexões** - Pergunte sobre rotas alternativas com conexão
+        
+        **Programas com melhor disponibilidade Brasil → EUA:**
+        - **Smiles** (GOL) - Boa disponibilidade, preços dinâmicos
+        - **AAdvantage** - Tabela fixa, excelente valor em Business
+        - **United MileagePlus** - Boa cobertura Star Alliance
+        
+        **Programas com melhor disponibilidade Brasil → Europa:**
+        - **TAP Miles&Go** - Voos diretos Lisboa/Porto
+        - **Flying Blue** - Air France/KLM via Paris/Amsterdam
+        - **Iberia Plus** - Tabela fixa vantajosa
+        
+        **Perguntas úteis para o Assistant:**
+        - "Qual o programa com menor custo em milhas para essa rota?"
+        - "Tem disponibilidade em Business classe com milhas?"
+        - "Quais datas têm mais disponibilidade nesse mês?"
+        """)
+
+# ============================================
+# TAB 4: COMPARADOR DE MILHAS
+# ============================================
+with tab4:
     st.subheader("🎯 Comparador: Dinheiro vs. Milhas")
     
     df = load_flight_data()
@@ -671,9 +885,9 @@ with tab3:
         """)
 
 # ============================================
-# TAB 4: AEROPORTOS
+# TAB 5: AEROPORTOS
 # ============================================
-with tab4:
+with tab5:
     st.subheader("🛫 Consulta de Aeroportos")
     
     busca_aeroporto = st.text_input("Digite cidade, país ou código IATA:", placeholder="Ex: Paris, Brasil, JFK...")
