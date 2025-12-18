@@ -249,7 +249,27 @@ def get_airline_name(code):
 def load_flight_data():
     try:
         df = pd.read_csv(SHEET_URL)
-        df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada', 'Paradas']
+        
+        # Detecta número de colunas e ajusta
+        expected_columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada', 'Paradas']
+        
+        if len(df.columns) == 11:
+            df.columns = expected_columns
+        elif len(df.columns) == 10:
+            # Falta uma coluna - provavelmente Paradas
+            df.columns = expected_columns[:10]
+            df['Paradas'] = 0
+        elif len(df.columns) == 8:
+            # Versão antiga sem Partida, Chegada, Paradas
+            df.columns = expected_columns[:8]
+            df['Partida'] = ''
+            df['Chegada'] = ''
+            df['Paradas'] = 0
+        else:
+            # Usa as colunas que vieram
+            st.warning(f"Planilha com {len(df.columns)} colunas. Esperado: 11")
+            return None
+        
         df['Preço BRL'] = pd.to_numeric(df['Preço BRL'], errors='coerce')
         df['Paradas'] = pd.to_numeric(df['Paradas'], errors='coerce').fillna(0).astype(int)
         df['Companhia Nome'] = df['Companhia'].apply(get_airline_name)
