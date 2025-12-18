@@ -10,7 +10,7 @@ st.set_page_config(
 )
 
 # URL do Webhook (Make)
-WEBHOOK_URL = "https://hook.us2.make.com/ewd1k1ngiulmplmb8gitlsio1xztpikx"
+WEBHOOK_URL = "https://hook.us2.make.com/tofuuriqeniuljwnep5jqctntrtttq6r"
 
 # Header
 st.title("✈️ AirPoint - Busca de Voos")
