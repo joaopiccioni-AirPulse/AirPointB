@@ -1,8 +1,10 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import time
+import re
+import json
 
 # Configuração da página
 st.set_page_config(
@@ -15,6 +17,9 @@ st.set_page_config(
 WEBHOOK_URL = "https://hook.us2.make.com/tofuuriqeniuljwnep5jqctntrtttq6r"
 SHEET_ID = "1AYmrD_1zwp4D64rs32zMVYhCjn0c4Ubn9RpeUKfK85o"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
+
+# Webhook para salvar dados de milhas (você vai criar no Make)
+WEBHOOK_MILHAS_URL = "https://hook.us2.make.com/SUBSTITUIR_PELO_SEU_WEBHOOK_MILHAS"
 
 # ============================================
 # TABELAS DE DADOS
@@ -345,6 +350,237 @@ def duration_to_minutes(duration_str):
         return 9999
 
 # ============================================
+# FUNÇÕES PARA PARSING DE RESULTADOS DO SEATS.AERO
+# ============================================
+
+def parse_miles_from_text(text):
+    """
+    Parser inteligente para extrair dados de disponibilidade de milhas
+    do texto retornado pelo Seats.aero Assistant
+    """
+    results = []
+    
+    # Padrões comuns de milhas (30,000 / 30000 / 30.000 / 30k)
+    miles_patterns = [
+        r'(\d{1,3}[,.\s]?\d{3})\s*(?:miles|milhas|mi)',
+        r'(\d{2,3})k\s*(?:miles|milhas)?',
+        r'(\d{1,3}[,.\s]?\d{3})\s*(?:pts|points|pontos)',
+    ]
+    
+    # Padrões de programas
+    program_patterns = {
+        'Smiles': r'(?i)(smiles|gol)',
+        'AAdvantage': r'(?i)(aadvantage|american\s*airlines|aa\b)',
+        'United MileagePlus': r'(?i)(mileageplus|united)',
+        'Delta SkyMiles': r'(?i)(skymiles|delta)',
+        'Azul': r'(?i)(tudoazul|azul)',
+        'Aeroplan': r'(?i)(aeroplan|air\s*canada)',
+        'Flying Blue': r'(?i)(flying\s*blue|air\s*france|klm)',
+        'Emirates Skywards': r'(?i)(skywards|emirates)',
+        'Etihad Guest': r'(?i)(etihad)',
+        'LATAM Pass': r'(?i)(latam\s*pass|latam)',
+        'TAP Miles&Go': r'(?i)(miles\s*&\s*go|tap)',
+        'Iberia Plus': r'(?i)(iberia\s*plus|iberia)',
+        'Qatar Privilege': r'(?i)(privilege|qatar)',
+        'Turkish Miles': r'(?i)(turkish|miles\s*&\s*smiles)',
+    }
+    
+    # Padrões de classe
+    class_patterns = {
+        'Economy': r'(?i)(economy|econ|Y\b|econômica)',
+        'Premium Economy': r'(?i)(premium\s*economy|premium\s*econ|W\b)',
+        'Business': r'(?i)(business|executiva|J\b)',
+        'First': r'(?i)(first|primeira|F\b)',
+    }
+    
+    # Padrões de data
+    date_patterns = [
+        r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})',
+        r'(\d{1,2}\s+(?:jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*\s*\d{2,4})',
+        r'(\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s*\d{2,4})',
+    ]
+    
+    # Padrão de companhias aéreas
+    airline_codes = '|'.join(AIRLINES.keys())
+    airline_pattern = rf'\b({airline_codes})\b'
+    
+    # Divide o texto em linhas ou blocos
+    lines = text.split('\n')
+    
+    current_result = {}
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if current_result and 'milhas' in current_result:
+                results.append(current_result)
+                current_result = {}
+            continue
+        
+        # Busca milhas
+        for pattern in miles_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                miles_str = match.group(1)
+                # Limpa e converte
+                miles_str = miles_str.replace(',', '').replace('.', '').replace(' ', '')
+                if 'k' in line.lower():
+                    miles_str = miles_str + '000'
+                try:
+                    current_result['milhas'] = int(miles_str)
+                except:
+                    pass
+        
+        # Busca programa
+        for program, pattern in program_patterns.items():
+            if re.search(pattern, line):
+                current_result['programa'] = program
+                break
+        
+        # Busca classe
+        for cabin, pattern in class_patterns.items():
+            if re.search(pattern, line):
+                current_result['classe'] = cabin
+                break
+        
+        # Busca data
+        for pattern in date_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                current_result['data'] = match.group(1)
+                break
+        
+        # Busca companhia
+        match = re.search(airline_pattern, line)
+        if match:
+            current_result['companhia'] = match.group(1)
+        
+        # Busca se é direto ou conexão
+        if re.search(r'(?i)(direto|direct|nonstop|non-stop)', line):
+            current_result['paradas'] = 'Direto'
+        elif re.search(r'(?i)(1\s*(?:stop|parada|conexão)|one\s*stop)', line):
+            current_result['paradas'] = '1 parada'
+        elif re.search(r'(?i)(2\s*(?:stops|paradas|conexões)|two\s*stops)', line):
+            current_result['paradas'] = '2 paradas'
+        
+        # Busca assentos disponíveis
+        seats_match = re.search(r'(\d+)\s*(?:seats?|assentos?|vagas?)', line, re.IGNORECASE)
+        if seats_match:
+            current_result['assentos'] = int(seats_match.group(1))
+    
+    # Adiciona último resultado se existir
+    if current_result and 'milhas' in current_result:
+        results.append(current_result)
+    
+    return results
+
+def classify_deal_quality(milhas, classe, custo_por_mil, preco_cash=None):
+    """
+    Classifica a qualidade do deal baseado em benchmarks do mercado
+    Retorna: ('excelente', 'bom', 'regular', 'ruim') e o motivo
+    """
+    # Benchmarks de valor por 1k milhas (R$)
+    benchmarks = {
+        'Economy': {'excelente': 25, 'bom': 35, 'regular': 50},
+        'Premium Economy': {'excelente': 35, 'bom': 50, 'regular': 70},
+        'Business': {'excelente': 50, 'bom': 70, 'regular': 100},
+        'First': {'excelente': 70, 'bom': 100, 'regular': 150},
+    }
+    
+    bench = benchmarks.get(classe, benchmarks['Economy'])
+    
+    if preco_cash and milhas > 0:
+        valor_por_mil = (preco_cash / milhas) * 1000
+        
+        if valor_por_mil >= bench['excelente']:
+            return 'excelente', f"Valor de R$ {valor_por_mil:.2f}/1k milhas é excelente!"
+        elif valor_por_mil >= bench['bom']:
+            return 'bom', f"Valor de R$ {valor_por_mil:.2f}/1k milhas é bom"
+        elif valor_por_mil >= bench['regular']:
+            return 'regular', f"Valor de R$ {valor_por_mil:.2f}/1k milhas é regular"
+        else:
+            return 'ruim', f"Valor de R$ {valor_por_mil:.2f}/1k milhas é baixo"
+    
+    return 'indefinido', "Não foi possível avaliar"
+
+def check_alerts(results, custo_por_mil=20.0, preco_cash=None):
+    """
+    Verifica se algum resultado merece um alerta de oportunidade
+    """
+    alerts = []
+    
+    for result in results:
+        milhas = result.get('milhas', 0)
+        classe = result.get('classe', 'Economy')
+        programa = result.get('programa', 'Desconhecido')
+        
+        if milhas > 0:
+            custo_total = (milhas / 1000) * custo_por_mil
+            
+            # Benchmarks de "bom negócio" por classe
+            thresholds = {
+                'Economy': 1500,      # Se custar menos que R$ 1.500 em milhas
+                'Premium Economy': 3000,
+                'Business': 5000,
+                'First': 8000,
+            }
+            
+            threshold = thresholds.get(classe, 2000)
+            
+            if custo_total < threshold:
+                quality, reason = classify_deal_quality(milhas, classe, custo_por_mil, preco_cash)
+                
+                if quality in ['excelente', 'bom']:
+                    alerts.append({
+                        'tipo': 'oportunidade',
+                        'qualidade': quality,
+                        'programa': programa,
+                        'classe': classe,
+                        'milhas': milhas,
+                        'custo_estimado': custo_total,
+                        'mensagem': f"🎯 {programa}: {milhas:,} milhas em {classe} = R$ {custo_total:,.2f}",
+                        'razao': reason
+                    })
+            
+            # Alerta de preço muito baixo (possível erro de tarifa)
+            if classe == 'Business' and milhas < 40000:
+                alerts.append({
+                    'tipo': 'erro_tarifa',
+                    'programa': programa,
+                    'classe': classe,
+                    'milhas': milhas,
+                    'mensagem': f"⚠️ POSSÍVEL ERRO: {programa} {classe} por apenas {milhas:,} milhas!"
+                })
+    
+    return alerts
+
+def save_miles_search(origem, destino, data_busca, resultados, webhook_url):
+    """
+    Salva a busca de milhas via webhook do Make para histórico
+    """
+    try:
+        payload = {
+            "data_busca": datetime.now().isoformat(),
+            "origem": origem,
+            "destino": destino,
+            "data_voo": data_busca,
+            "resultados": json.dumps(resultados, ensure_ascii=False),
+            "quantidade_opcoes": len(resultados)
+        }
+        
+        response = requests.post(webhook_url, json=payload, timeout=30)
+        return response.status_code == 200
+    except Exception as e:
+        return False
+
+# Inicializa histórico na sessão
+if 'historico_milhas' not in st.session_state:
+    st.session_state.historico_milhas = []
+
+if 'alertas_ativos' not in st.session_state:
+    st.session_state.alertas_ativos = []
+
+# ============================================
 # INTERFACE
 # ============================================
 
@@ -507,11 +743,39 @@ with tab2:
         st.info("Faça uma busca na aba 'Nova Busca'.")
 
 # ============================================
-# TAB 3: BUSCAR MILHAS (Semi-automatizado)
+# TAB 3: BUSCAR MILHAS (Semi-automatizado com Parser e Alertas)
 # ============================================
 with tab3:
     st.subheader("🎫 Buscar Disponibilidade de Milhas")
     st.markdown("Use o **Seats.aero Assistant** para encontrar award seats disponíveis")
+    
+    # Mostra alertas ativos no topo
+    if st.session_state.alertas_ativos:
+        with st.expander(f"🔔 Alertas Ativos ({len(st.session_state.alertas_ativos)})", expanded=True):
+            for alerta in st.session_state.alertas_ativos[-5:]:  # Últimos 5
+                if alerta.get('tipo') == 'erro_tarifa':
+                    st.error(alerta['mensagem'])
+                elif alerta.get('qualidade') == 'excelente':
+                    st.success(alerta['mensagem'])
+                else:
+                    st.info(alerta['mensagem'])
+            
+            if st.button("🗑️ Limpar Alertas"):
+                st.session_state.alertas_ativos = []
+                st.rerun()
+    
+    st.divider()
+    
+    # Configuração de custo de aquisição (para alertas)
+    with st.expander("⚙️ Configurar custo de aquisição de milhas"):
+        custo_usuario_mil = st.number_input(
+            "Seu custo médio por 1.000 milhas (R$)",
+            value=20.0,
+            min_value=0.0,
+            step=1.0,
+            help="Usado para calcular se uma oferta é boa",
+            key="custo_mil_tab3"
+        )
     
     st.divider()
     
@@ -605,7 +869,7 @@ Ordene do menor para o maior custo em milhas."""
             unsafe_allow_html=True
         )
     with col_btn2:
-        if st.button("📋 Copiar Prompt", use_container_width=True):
+        if st.button("📋 Copiar Prompt", use_container_width=True, key="copy_prompt"):
             st.toast("Use Ctrl+C para copiar o texto acima!")
     
     st.divider()
@@ -621,78 +885,190 @@ Ordene do menor para o maior custo em milhas."""
         key="resultado_seats"
     )
     
+    # Botão para processar
+    processar_resultado = st.button("🔍 Processar Resultado", type="primary", use_container_width=True)
+    
     # Passo 4: Processar e comparar
-    if resultado_assistant:
+    if resultado_assistant and processar_resultado:
         st.divider()
-        st.markdown("### 4️⃣ Análise e Comparação")
+        st.markdown("### 4️⃣ Análise Automática")
         
-        # Tenta extrair dados do resultado (parsing básico)
-        st.markdown("#### 📊 Dados extraídos:")
-        
-        # Exibe o resultado formatado
-        st.info(resultado_assistant)
+        # Parser automático
+        with st.spinner("Extraindo dados..."):
+            resultados_parseados = parse_miles_from_text(resultado_assistant)
         
         # Busca preço cash para comparação
         df = load_flight_data()
+        preco_cash_ref = None
         if df is not None and len(df) > 0:
             df_rota = df[(df['Origem'] == busca_origem_milhas) & (df['Destino'] == busca_destino_milhas)]
-            
             if len(df_rota) > 0:
-                st.markdown("#### 💵 Preços em dinheiro (para comparação):")
+                preco_cash_ref = df_rota['Preço BRL'].min()
+        
+        if resultados_parseados:
+            st.success(f"✅ Encontradas **{len(resultados_parseados)} opções** de milhas!")
+            
+            # Verifica alertas
+            alertas = check_alerts(resultados_parseados, custo_usuario_mil, preco_cash_ref)
+            if alertas:
+                st.session_state.alertas_ativos.extend(alertas)
+                for alerta in alertas:
+                    if alerta.get('tipo') == 'erro_tarifa':
+                        st.error(f"🚨 {alerta['mensagem']}")
+                    elif alerta.get('qualidade') == 'excelente':
+                        st.balloons()
+                        st.success(f"🎉 OPORTUNIDADE: {alerta['mensagem']}")
+                    elif alerta.get('qualidade') == 'bom':
+                        st.success(alerta['mensagem'])
+            
+            st.divider()
+            
+            # Tabela de resultados parseados
+            st.markdown("#### 📊 Opções Encontradas")
+            
+            # Converte para DataFrame
+            df_milhas = pd.DataFrame(resultados_parseados)
+            
+            # Adiciona colunas calculadas
+            if 'milhas' in df_milhas.columns:
+                df_milhas['Custo Estimado (R$)'] = df_milhas['milhas'].apply(
+                    lambda x: f"R$ {(x/1000 * custo_usuario_mil):,.2f}" if pd.notna(x) else "-"
+                )
                 
-                for classe in df_rota['Classe'].unique():
-                    df_classe = df_rota[df_rota['Classe'] == classe]
-                    if len(df_classe) > 0:
-                        menor_preco = df_classe['Preço BRL'].min()
-                        st.metric(
-                            label=f"{classe}",
-                            value=f"R$ {menor_preco:,.2f}",
-                            help="Menor preço encontrado em dinheiro"
-                        )
+                if preco_cash_ref:
+                    df_milhas['Valor/1k'] = df_milhas['milhas'].apply(
+                        lambda x: f"R$ {(preco_cash_ref/x*1000):.2f}" if pd.notna(x) and x > 0 else "-"
+                    )
+                    df_milhas['Economia'] = df_milhas['milhas'].apply(
+                        lambda x: f"{((preco_cash_ref - (x/1000*custo_usuario_mil))/preco_cash_ref*100):.0f}%" if pd.notna(x) and x > 0 else "-"
+                    )
+            
+            # Renomeia colunas para exibição
+            colunas_display = {
+                'programa': 'Programa',
+                'milhas': 'Milhas',
+                'classe': 'Classe',
+                'data': 'Data',
+                'companhia': 'Cia',
+                'paradas': 'Paradas',
+                'assentos': 'Assentos',
+                'Custo Estimado (R$)': 'Custo Est.',
+                'Valor/1k': 'Valor/1k',
+                'Economia': 'Economia'
+            }
+            
+            df_display = df_milhas.rename(columns=colunas_display)
+            
+            # Seleciona apenas colunas existentes
+            colunas_mostrar = [c for c in colunas_display.values() if c in df_display.columns]
+            
+            st.dataframe(df_display[colunas_mostrar], use_container_width=True, hide_index=True)
+            
+            # Salva no histórico
+            historico_entry = {
+                'data_busca': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                'origem': busca_origem_milhas,
+                'destino': busca_destino_milhas,
+                'periodo': f"{data_inicio_str} - {data_fim_str}",
+                'opcoes': len(resultados_parseados),
+                'melhor_milhas': min([r.get('milhas', 999999) for r in resultados_parseados]),
+                'resultados': resultados_parseados
+            }
+            st.session_state.historico_milhas.append(historico_entry)
+            
+            st.divider()
+            
+            # Melhor opção destacada
+            if resultados_parseados:
+                melhor = min(resultados_parseados, key=lambda x: x.get('milhas', 999999))
                 
-                st.divider()
+                st.markdown("#### 🏆 Melhor Opção")
+                col1, col2, col3 = st.columns(3)
                 
-                # Calculadora manual
-                st.markdown("#### 🧮 Calculadora de Valor")
-                st.caption("Insira os dados de uma opção em milhas para calcular se vale a pena:")
+                with col1:
+                    st.metric("Programa", melhor.get('programa', 'N/A'))
+                with col2:
+                    st.metric("Milhas", f"{melhor.get('milhas', 0):,}")
+                with col3:
+                    custo_melhor = (melhor.get('milhas', 0) / 1000) * custo_usuario_mil
+                    st.metric("Custo Estimado", f"R$ {custo_melhor:,.2f}")
                 
-                col_calc1, col_calc2, col_calc3 = st.columns(3)
-                with col_calc1:
-                    milhas_necessarias = st.number_input("Milhas necessárias", min_value=0, value=30000, step=1000)
-                with col_calc2:
-                    custo_por_mil = st.number_input("Seu custo por 1.000 milhas (R$)", min_value=0.0, value=20.0, step=1.0)
-                with col_calc3:
-                    preco_cash_comparar = st.number_input("Preço em dinheiro (R$)", min_value=0.0, value=float(df_rota['Preço BRL'].min()), step=100.0)
-                
-                if milhas_necessarias > 0 and preco_cash_comparar > 0:
-                    custo_total_milhas = (milhas_necessarias / 1000) * custo_por_mil
-                    valor_por_milha = (preco_cash_comparar / milhas_necessarias) * 1000
-                    economia = preco_cash_comparar - custo_total_milhas
-                    economia_percent = (economia / preco_cash_comparar) * 100
-                    
-                    st.divider()
-                    
-                    col_res1, col_res2, col_res3 = st.columns(3)
-                    with col_res1:
-                        st.metric("Custo com milhas", f"R$ {custo_total_milhas:,.2f}")
-                    with col_res2:
-                        st.metric("Valor por 1k milhas", f"R$ {valor_por_milha:.2f}")
-                    with col_res3:
-                        if economia > 0:
-                            st.metric("Economia", f"R$ {economia:,.2f}", f"{economia_percent:.0f}%")
-                        else:
-                            st.metric("Prejuízo", f"R$ {abs(economia):,.2f}", f"{economia_percent:.0f}%", delta_color="inverse")
-                    
-                    if economia > 0:
-                        st.success(f"✅ **Vale usar milhas!** Você economiza R$ {economia:,.2f} ({economia_percent:.0f}%)")
+                if preco_cash_ref:
+                    economia_melhor = preco_cash_ref - custo_melhor
+                    if economia_melhor > 0:
+                        st.success(f"✅ Usando {melhor.get('programa', 'milhas')}, você economiza **R$ {economia_melhor:,.2f}** comparado ao preço em dinheiro (R$ {preco_cash_ref:,.2f})")
                     else:
-                        st.warning(f"💵 **Pague em dinheiro.** Usar milhas custaria R$ {abs(economia):,.2f} a mais.")
-            else:
-                st.info(f"💡 Faça uma busca de voos cash para {busca_origem_milhas} → {busca_destino_milhas} na aba 'Nova Busca' para comparar preços.")
+                        st.warning(f"💵 Para esta rota, pagar em dinheiro (R$ {preco_cash_ref:,.2f}) é mais vantajoso")
+        
         else:
-            st.info("💡 Faça uma busca de voos na aba 'Nova Busca' para comparar preços em dinheiro.")
+            st.warning("⚠️ Não foi possível extrair dados estruturados. Verifique o formato da resposta.")
+            st.markdown("**Texto original:**")
+            st.info(resultado_assistant)
+        
+        # Comparação com preço cash
+        if df is not None and len(df) > 0 and preco_cash_ref:
+            st.divider()
+            st.markdown("#### 💵 Referência: Preço em Dinheiro")
+            
+            for classe in df_rota['Classe'].unique():
+                df_classe = df_rota[df_rota['Classe'] == classe]
+                if len(df_classe) > 0:
+                    menor_preco = df_classe['Preço BRL'].min()
+                    st.metric(
+                        label=f"{classe}",
+                        value=f"R$ {menor_preco:,.2f}",
+                        help="Menor preço encontrado em dinheiro"
+                    )
     
     st.divider()
+    
+    # Histórico de buscas
+    if st.session_state.historico_milhas:
+        with st.expander(f"📜 Histórico de Buscas ({len(st.session_state.historico_milhas)})"):
+            for i, h in enumerate(reversed(st.session_state.historico_milhas[-10:])):  # Últimas 10
+                col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                with col1:
+                    st.write(f"**{h['origem']} → {h['destino']}**")
+                with col2:
+                    st.write(h['periodo'])
+                with col3:
+                    st.write(f"{h['opcoes']} opções")
+                with col4:
+                    st.write(f"Melhor: {h['melhor_milhas']:,}")
+                st.caption(f"Busca em: {h['data_busca']}")
+                st.divider()
+            
+            if st.button("🗑️ Limpar Histórico"):
+                st.session_state.historico_milhas = []
+                st.rerun()
+    
+    st.divider()
+    
+    # Calculadora manual (caso o parser não funcione)
+    with st.expander("🧮 Calculadora Manual"):
+        st.caption("Use se o parser automático não extrair os dados corretamente:")
+        
+        col_calc1, col_calc2, col_calc3 = st.columns(3)
+        with col_calc1:
+            milhas_manual = st.number_input("Milhas necessárias", min_value=0, value=30000, step=1000, key="milhas_manual")
+        with col_calc2:
+            custo_manual = st.number_input("Custo por 1k milhas (R$)", min_value=0.0, value=20.0, step=1.0, key="custo_manual")
+        with col_calc3:
+            preco_cash_manual = st.number_input("Preço cash (R$)", min_value=0.0, value=3000.0, step=100.0, key="cash_manual")
+        
+        if milhas_manual > 0 and preco_cash_manual > 0:
+            custo_total = (milhas_manual / 1000) * custo_manual
+            valor_1k = (preco_cash_manual / milhas_manual) * 1000
+            economia_manual = preco_cash_manual - custo_total
+            
+            col_r1, col_r2, col_r3 = st.columns(3)
+            with col_r1:
+                st.metric("Custo com milhas", f"R$ {custo_total:,.2f}")
+            with col_r2:
+                st.metric("Valor por 1k", f"R$ {valor_1k:.2f}")
+            with col_r3:
+                delta = f"{(economia_manual/preco_cash_manual*100):.0f}%"
+                st.metric("Economia", f"R$ {economia_manual:,.2f}", delta)
     
     # Dicas
     with st.expander("💡 Dicas para usar o Seats.aero Assistant"):
@@ -718,6 +1094,11 @@ Ordene do menor para o maior custo em milhas."""
         - "Qual o programa com menor custo em milhas para essa rota?"
         - "Tem disponibilidade em Business classe com milhas?"
         - "Quais datas têm mais disponibilidade nesse mês?"
+        
+        **Sobre os alertas:**
+        - 🎉 **Oportunidade Excelente**: Valor > R$ 50/1k milhas em Business
+        - ✅ **Boa Oportunidade**: Valor > R$ 35/1k milhas
+        - 🚨 **Possível Erro de Tarifa**: Business por < 40k milhas (raro!)
         """)
 
 # ============================================
