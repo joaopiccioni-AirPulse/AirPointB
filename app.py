@@ -127,20 +127,40 @@ def calcular_custo_milhas(milhas, programa):
 @st.cache_data(ttl=30)
 def load_flight_data():
     try:
+        # Tenta carregar a planilha
         df = pd.read_csv(SHEET_URL)
+        
+        if df is None or len(df) == 0:
+            st.session_state['sheet_error'] = "Planilha vazia ou não encontrada"
+            return None
+        
         num_cols = len(df.columns)
+        st.session_state['sheet_cols'] = num_cols
+        
         if num_cols >= 12:
             df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada', 'Paradas'][:num_cols]
         elif num_cols >= 11:
             df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada', 'Paradas'][:num_cols]
             df['Num Voo'] = ''
+        elif num_cols >= 10:
+            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada'][:num_cols]
+            df['Num Voo'] = ''
+            df['Paradas'] = 0
         else:
-            return None
+            # Tenta usar as colunas como estão
+            st.session_state['sheet_error'] = f"Planilha com {num_cols} colunas. Colunas encontradas: {list(df.columns)}"
+            # Renomeia o que for possível
+            col_names = list(df.columns)
+            return df
+        
         df['Preço BRL'] = pd.to_numeric(df['Preço BRL'], errors='coerce')
         df['Paradas'] = pd.to_numeric(df['Paradas'], errors='coerce').fillna(0).astype(int)
         df['Companhia Nome'] = df['Companhia'].apply(get_airline_name)
+        
+        st.session_state['sheet_error'] = None
         return df
     except Exception as e:
+        st.session_state['sheet_error'] = f"Erro: {str(e)}"
         return None
 
 @st.cache_data(ttl=60)
@@ -402,20 +422,56 @@ with tab2:
     df = load_flight_data()
     
     if debug_mode:
-        with st.expander("📋 Dados da Planilha (Debug)"):
+        with st.expander("📋 Dados da Planilha (Debug)", expanded=True):
+            st.write(f"**URL da Planilha:** `{SHEET_URL}`")
+            st.write(f"**Sheet ID:** `{SHEET_ID}`")
+            
+            # Mostra erro se houver
+            if 'sheet_error' in st.session_state and st.session_state['sheet_error']:
+                st.error(f"**Erro detectado:** {st.session_state['sheet_error']}")
+            
+            if 'sheet_cols' in st.session_state:
+                st.write(f"**Colunas encontradas:** {st.session_state['sheet_cols']}")
+            
             if df is not None:
-                st.write(f"Total de linhas: {len(df)}")
-                st.write(f"Colunas: {list(df.columns)}")
-                st.write("Primeiras 5 linhas:")
+                st.success(f"✅ DataFrame carregado com {len(df)} linhas")
+                st.write(f"**Colunas:** {list(df.columns)}")
+                st.write("**Primeiras 5 linhas:**")
                 st.dataframe(df.head())
-                st.write("Origens únicas:", df['Origem'].unique().tolist() if 'Origem' in df.columns else "N/A")
-                st.write("Destinos únicos:", df['Destino'].unique().tolist() if 'Destino' in df.columns else "N/A")
-                st.write("Datas únicas:", df['Data Voo'].unique().tolist() if 'Data Voo' in df.columns else "N/A")
+                st.write("**Origens únicas:**", df['Origem'].unique().tolist() if 'Origem' in df.columns else "N/A")
+                st.write("**Destinos únicos:**", df['Destino'].unique().tolist() if 'Destino' in df.columns else "N/A")
+                st.write("**Datas únicas:**", df['Data Voo'].unique().tolist() if 'Data Voo' in df.columns else "N/A")
             else:
-                st.error("DataFrame é None - erro ao carregar planilha")
+                st.error("❌ DataFrame é None - erro ao carregar planilha")
+                st.markdown("""
+                **Possíveis causas:**
+                1. A planilha não está compartilhada publicamente
+                2. O ID da planilha está incorreto
+                3. A planilha está vazia ou sem dados na primeira aba
+                4. Problema de conexão com Google Sheets
+                
+                **Para corrigir:**
+                1. Abra a planilha no Google Sheets
+                2. Clique em "Compartilhar"
+                3. Selecione "Qualquer pessoa com o link"
+                4. Defina como "Leitor"
+                """)
+                
+                # Testa conexão direta
+                st.write("**Testando conexão...**")
+                try:
+                    import urllib.request
+                    response = urllib.request.urlopen(SHEET_URL, timeout=10)
+                    content = response.read().decode('utf-8')[:500]
+                    st.write("Resposta recebida (primeiros 500 chars):")
+                    st.code(content)
+                except Exception as e:
+                    st.error(f"Erro na conexão: {e}")
     
     if df is None:
-        st.error("❌ Erro ao carregar dados da planilha. Verifique a conexão.")
+        st.error("❌ Erro ao carregar dados da planilha. Ative o 'Modo Debug' para mais detalhes.")
+        if 'sheet_error' in st.session_state and st.session_state['sheet_error']:
+            st.warning(f"Detalhe: {st.session_state['sheet_error']}")
         st.stop()
     
     if len(df) == 0:
