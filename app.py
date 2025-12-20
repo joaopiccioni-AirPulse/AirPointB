@@ -850,6 +850,7 @@ Cabines: {cabines_str}
 Por favor, liste as opções disponíveis com:
 - Programa de milhas
 - Data do voo
+- Número do voo
 - Quantidade de milhas necessárias
 - Classe (Economy/Business/First)
 - Companhia aérea operadora
