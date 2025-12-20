@@ -19,7 +19,7 @@ SHEET_ID = "1AYmrD_1zwp4D64rs32zMVYhCjn0c4Ubn9RpeUKfK85o"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
 
 # Webhook para salvar dados de milhas (você vai criar no Make)
-WEBHOOK_MILHAS_URL = "https://hook.us2.make.com/absqlpqrivvd323erxmetebauv5uy3ly"
+WEBHOOK_MILHAS_URL = "https://hook.us2.make.com/o01sj3mie8xc1ro683sfcayliipnuf8b"
 
 # ============================================
 # TABELAS DE DADOS
