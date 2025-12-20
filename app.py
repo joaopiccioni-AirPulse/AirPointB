@@ -243,32 +243,65 @@ with tab1:
     
     col1, col2 = st.columns(2)
     with col1:
-        busca_origem = st.text_input("🔎 Origem", placeholder="Ex: São Paulo, NYC, GRU")
-        origens = ["GRU"]
-        if busca_origem:
-            res = search_airports(busca_origem)
-            if res:
-                opts = [f"{'📍' if r['tipo']=='metro' else '✈️'} {r['codigo']} - {r['cidade']}" for r in res]
-                sel = st.multiselect("Selecione (máx 2):", opts, max_selections=2, key="so")
-                origens = []
-                for s in sel:
-                    code = s.split(' - ')[0].replace('📍 ', '').replace('✈️ ', '')
-                    origens.extend(expand_airport_code(code))
-        st.caption(f"Selecionados: {', '.join(origens) if origens else 'GRU'}")
+        st.markdown("**Origem**")
+        modo_origem = st.radio("Modo:", ["Código IATA", "Área Metropolitana"], key="modo_orig", horizontal=True)
+        
+        if modo_origem == "Área Metropolitana":
+            metros_opcoes = [f"{k} - {v['nome']}" for k, v in METRO_CODES.items()]
+            metro_sel = st.selectbox("Selecione a região:", metros_opcoes, key="metro_orig")
+            if metro_sel:
+                metro_code = metro_sel.split(' - ')[0]
+                origens = METRO_CODES[metro_code]['aeroportos']
+                st.success(f"✅ Aeroportos: {', '.join(origens)}")
+            else:
+                origens = ["GRU"]
+        else:
+            busca_origem = st.text_input("🔎 Buscar aeroporto:", placeholder="Ex: GRU, São Paulo, Miami", key="busca_orig")
+            origens = []
+            if busca_origem:
+                res = search_airports(busca_origem)
+                # Filtra só aeroportos (não metros)
+                res_aeroportos = [r for r in res if r['tipo'] == 'aeroporto']
+                if res_aeroportos:
+                    opts = [f"{r['codigo']} - {r['cidade']} ({r['pais']})" for r in res_aeroportos]
+                    sel = st.multiselect("Selecione (máx 2):", opts, max_selections=2, key="so")
+                    for s in sel:
+                        code = s.split(' - ')[0]
+                        origens.append(code)
+            if not origens:
+                origens = ["GRU"]
+            st.caption(f"Selecionados: {', '.join(origens)}")
     
     with col2:
-        busca_destino = st.text_input("🔎 Destino", placeholder="Ex: Miami, NYC, LIS")
-        destinos = ["MIA"]
-        if busca_destino:
-            res = search_airports(busca_destino)
-            if res:
-                opts = [f"{'📍' if r['tipo']=='metro' else '✈️'} {r['codigo']} - {r['cidade']}" for r in res]
-                sel = st.multiselect("Selecione (máx 2):", opts, max_selections=2, key="sd")
-                destinos = []
-                for s in sel:
-                    code = s.split(' - ')[0].replace('📍 ', '').replace('✈️ ', '')
-                    destinos.extend(expand_airport_code(code))
-        st.caption(f"Selecionados: {', '.join(destinos) if destinos else 'MIA'}")
+        st.markdown("**Destino**")
+        modo_destino = st.radio("Modo:", ["Código IATA", "Área Metropolitana"], key="modo_dest", horizontal=True)
+        
+        if modo_destino == "Área Metropolitana":
+            metros_opcoes = [f"{k} - {v['nome']}" for k, v in METRO_CODES.items()]
+            metro_sel = st.selectbox("Selecione a região:", metros_opcoes, key="metro_dest")
+            if metro_sel:
+                metro_code = metro_sel.split(' - ')[0]
+                destinos = METRO_CODES[metro_code]['aeroportos']
+                st.success(f"✅ Aeroportos: {', '.join(destinos)}")
+            else:
+                destinos = ["MIA"]
+        else:
+            busca_destino = st.text_input("🔎 Buscar aeroporto:", placeholder="Ex: MIA, Miami, Lisboa", key="busca_dest")
+            destinos = []
+            if busca_destino:
+                res = search_airports(busca_destino)
+                res_aeroportos = [r for r in res if r['tipo'] == 'aeroporto']
+                if res_aeroportos:
+                    opts = [f"{r['codigo']} - {r['cidade']} ({r['pais']})" for r in res_aeroportos]
+                    sel = st.multiselect("Selecione (máx 2):", opts, max_selections=2, key="sd")
+                    for s in sel:
+                        code = s.split(' - ')[0]
+                        destinos.append(code)
+            if not destinos:
+                destinos = ["MIA"]
+            st.caption(f"Selecionados: {', '.join(destinos)}")
+    
+    st.divider()
     
     col3, col4, col5 = st.columns(3)
     with col3:
@@ -287,7 +320,7 @@ with tab1:
         st.info(f"📆 Período: **{num_dias} dia(s)** ({data_inicio.strftime('%d/%m')} a {data_fim.strftime('%d/%m')})")
     
     # Aviso de muitas buscas
-    total_buscas = len(origens if origens else ["GRU"]) * len(destinos if destinos else ["MIA"]) * num_dias
+    total_buscas = len(origens) * len(destinos) * num_dias
     if total_buscas > 10:
         st.warning(f"⚠️ Esta busca fará **{total_buscas} requisições**. Pode demorar alguns minutos.")
     
@@ -345,37 +378,101 @@ with tab1:
 # TAB 2: RESULTADOS
 with tab2:
     st.subheader("📊 Resultados")
-    if st.button("🔄 Atualizar"):
-        st.cache_data.clear()
-        st.rerun()
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("🔄 Atualizar Dados"):
+            st.cache_data.clear()
+            st.rerun()
+    with col_btn2:
+        debug_mode = st.checkbox("🔧 Modo Debug", value=False)
     
     if st.session_state.ultima_busca:
         b = st.session_state.ultima_busca
-        st.info(f"**{', '.join(b['origens'])} → {', '.join(b['destinos'])}** em **{b['data_display']}**")
+        st.info(f"🔍 Busca: **{', '.join(b['origens'])} → {', '.join(b['destinos'])}** | Período: **{b['data_display']}**")
+        
+        if debug_mode:
+            with st.expander("📋 Dados da Última Busca (Debug)"):
+                st.json(b)
+    else:
+        st.warning("⚠️ Nenhuma busca realizada. Vá para a aba 'Buscar Voos' primeiro.")
+        st.stop()
     
+    # Carrega dados
     df = load_flight_data()
-    if df is not None and st.session_state.ultima_busca:
-        b = st.session_state.ultima_busca
+    
+    if debug_mode:
+        with st.expander("📋 Dados da Planilha (Debug)"):
+            if df is not None:
+                st.write(f"Total de linhas: {len(df)}")
+                st.write(f"Colunas: {list(df.columns)}")
+                st.write("Primeiras 5 linhas:")
+                st.dataframe(df.head())
+                st.write("Origens únicas:", df['Origem'].unique().tolist() if 'Origem' in df.columns else "N/A")
+                st.write("Destinos únicos:", df['Destino'].unique().tolist() if 'Destino' in df.columns else "N/A")
+                st.write("Datas únicas:", df['Data Voo'].unique().tolist() if 'Data Voo' in df.columns else "N/A")
+            else:
+                st.error("DataFrame é None - erro ao carregar planilha")
+    
+    if df is None:
+        st.error("❌ Erro ao carregar dados da planilha. Verifique a conexão.")
+        st.stop()
+    
+    if len(df) == 0:
+        st.warning("⚠️ Planilha vazia. Faça uma busca primeiro.")
+        st.stop()
+    
+    # Aplica filtros
+    df_f = df.copy()
+    
+    # Filtro 1: Origem
+    df_f = df_f[df_f['Origem'].isin(b['origens'])]
+    if debug_mode:
+        st.write(f"Após filtro origem ({b['origens']}): {len(df_f)} linhas")
+    
+    # Filtro 2: Destino
+    df_f = df_f[df_f['Destino'].isin(b['destinos'])]
+    if debug_mode:
+        st.write(f"Após filtro destino ({b['destinos']}): {len(df_f)} linhas")
+    
+    # Filtro 3: Datas
+    if 'datas' in b and b['datas']:
+        df_f = df_f[df_f['Data Voo'].isin(b['datas'])]
+        if debug_mode:
+            st.write(f"Após filtro datas ({b['datas']}): {len(df_f)} linhas")
+    
+    # Filtro 4: Paradas
+    if b.get('paradas') == "Somente Diretos":
+        df_f = df_f[df_f['Paradas'] == 0]
+        if debug_mode:
+            st.write(f"Após filtro diretos: {len(df_f)} linhas")
+    elif b.get('paradas') == "Com Conexão":
+        df_f = df_f[df_f['Paradas'] > 0]
+        if debug_mode:
+            st.write(f"Após filtro conexões: {len(df_f)} linhas")
+    
+    st.divider()
+    
+    if len(df_f) == 0:
+        st.warning("⚠️ Nenhum voo encontrado para os critérios selecionados.")
         
-        # Filtra por origem e destino
-        df_f = df[(df['Origem'].isin(b['origens'])) & (df['Destino'].isin(b['destinos']))].copy()
+        # Sugestões
+        st.markdown("**Possíveis causas:**")
+        st.markdown("- A busca ainda não foi processada (aguarde alguns segundos e clique em 'Atualizar')")
+        st.markdown("- Os dados ainda não chegaram na planilha")
+        st.markdown("- Os filtros de origem/destino/data não correspondem aos dados")
         
-        # Filtra por período de datas
-        if 'datas' in b:
-            df_f = df_f[df_f['Data Voo'].isin(b['datas'])]
-        elif 'data' in b:
-            df_f = df_f[df_f['Data Voo'] == b['data']]
-        
-        # Filtra por tipo de paradas
-        if b['paradas'] == "Somente Diretos":
-            df_f = df_f[df_f['Paradas'] == 0]
-        elif b['paradas'] == "Com Conexão":
-            df_f = df_f[df_f['Paradas'] > 0]
-        
-        if len(df_f) > 0:
-            # Filtro adicional por data específica (se período)
-            if 'datas' in b and len(b['datas']) > 1:
-                datas_disponiveis = sorted(df_f['Data Voo'].unique())
+        if debug_mode:
+            st.markdown("**Dados disponíveis na planilha:**")
+            st.write("Rotas disponíveis:")
+            if len(df) > 0:
+                rotas = df.groupby(['Origem', 'Destino', 'Data Voo']).size().reset_index(name='Voos')
+                st.dataframe(rotas)
+    else:
+        # Filtro por data específica (se período)
+        if 'datas' in b and len(b['datas']) > 1:
+            datas_disponiveis = sorted(df_f['Data Voo'].unique().tolist())
+            if datas_disponiveis:
                 data_selecionada = st.selectbox(
                     "📅 Filtrar por data:",
                     ["Todas"] + datas_disponiveis,
@@ -383,49 +480,47 @@ with tab2:
                 )
                 if data_selecionada != "Todas":
                     df_f = df_f[df_f['Data Voo'] == data_selecionada]
-            
-            st.divider()
-            
-            # Melhores opções por classe
-            for classe in df_f['Classe'].unique():
-                df_c = df_f[df_f['Classe'] == classe]
-                if len(df_c) > 0:
-                    melhor = df_c.loc[df_c['Preço BRL'].idxmin()]
-                    st.markdown(f"### {classe}")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("💰 Menor Preço", f"R$ {melhor['Preço BRL']:,.2f}")
-                    with col2:
-                        # Formata data do voo
-                        data_voo_str = melhor['Data Voo']
-                        try:
-                            data_voo_fmt = datetime.strptime(data_voo_str, "%Y-%m-%d").strftime("%d/%m/%Y")
-                        except:
-                            data_voo_fmt = data_voo_str
-                        st.metric("📅 Data", data_voo_fmt)
-                    st.caption(f"{melhor['Companhia Nome']} {melhor.get('Num Voo', '')} | {format_stops(melhor['Paradas'])}")
-            
-            st.divider()
-            
-            # Tabela completa
-            cols = [c for c in ['Origem', 'Destino', 'Data Voo', 'Companhia Nome', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Paradas'] if c in df_f.columns]
-            df_d = df_f[cols].copy()
-            
-            # Formata colunas
-            if 'Data Voo' in df_d.columns:
-                df_d['Data Voo'] = df_d['Data Voo'].apply(lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%d/%m") if x else x)
-            df_d['Preço BRL'] = df_d['Preço BRL'].apply(lambda x: f"R$ {x:,.2f}")
-            df_d['Duração'] = df_d['Duração'].apply(format_duration)
-            df_d['Partida'] = df_d['Partida'].apply(format_time)
-            df_d['Paradas'] = df_d['Paradas'].apply(format_stops)
-            
-            # Ordena por preço
-            st.dataframe(df_d.sort_values('Preço BRL'), use_container_width=True, hide_index=True)
-            st.caption(f"Total: {len(df_f)} voos encontrados")
-        else:
-            st.warning("Nenhum voo encontrado para o período selecionado")
-    else:
-        st.info("Faça uma busca primeiro")
+        
+        st.divider()
+        
+        # Melhores opções por classe
+        st.markdown("### 🏆 Melhores Opções")
+        for classe in df_f['Classe'].unique():
+            df_c = df_f[df_f['Classe'] == classe]
+            if len(df_c) > 0:
+                melhor = df_c.loc[df_c['Preço BRL'].idxmin()]
+                st.markdown(f"#### {classe}")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("💰 Menor Preço", f"R$ {melhor['Preço BRL']:,.2f}")
+                with col2:
+                    data_voo_str = str(melhor['Data Voo'])
+                    try:
+                        data_voo_fmt = datetime.strptime(data_voo_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                    except:
+                        data_voo_fmt = data_voo_str
+                    st.metric("📅 Data", data_voo_fmt)
+                with col3:
+                    st.metric("✈️ Voo", f"{melhor['Companhia Nome']} {melhor.get('Num Voo', '')}")
+                st.caption(f"Rota: {melhor['Origem']} → {melhor['Destino']} | {format_stops(melhor['Paradas'])}")
+        
+        st.divider()
+        
+        # Tabela completa
+        st.markdown("### 📋 Todos os Voos")
+        cols = [c for c in ['Origem', 'Destino', 'Data Voo', 'Companhia Nome', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Paradas'] if c in df_f.columns]
+        df_d = df_f[cols].copy()
+        
+        # Formata colunas
+        if 'Data Voo' in df_d.columns:
+            df_d['Data Voo'] = df_d['Data Voo'].apply(lambda x: datetime.strptime(str(x), "%Y-%m-%d").strftime("%d/%m") if x else x)
+        df_d['Preço BRL'] = df_d['Preço BRL'].apply(lambda x: f"R$ {x:,.2f}" if pd.notna(x) else "N/A")
+        df_d['Duração'] = df_d['Duração'].apply(format_duration)
+        df_d['Partida'] = df_d['Partida'].apply(format_time)
+        df_d['Paradas'] = df_d['Paradas'].apply(format_stops)
+        
+        st.dataframe(df_d, use_container_width=True, hide_index=True)
+        st.caption(f"Total: {len(df_f)} voos encontrados")
 
 # TAB 3: BUSCAR MILHAS
 with tab3:
