@@ -19,7 +19,7 @@ SHEET_ID = "1AYmrD_1zwp4D64rs32zMVYhCjn0c4Ubn9RpeUKfK85o"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
 
 # Webhook para salvar dados de milhas (você vai criar no Make)
-WEBHOOK_MILHAS_URL = "https://hook.us2.make.com/SUBSTITUIR_PELO_SEU_WEBHOOK_MILHAS"
+WEBHOOK_MILHAS_URL = "https://hook.us2.make.com/absqlpqrivvd323erxmetebauv5uy3ly"
 
 # ============================================
 # TABELAS DE DADOS
@@ -964,7 +964,10 @@ Ordene do menor para o maior custo em milhas."""
             
             st.dataframe(df_display[colunas_mostrar], use_container_width=True, hide_index=True)
             
-            # Salva no histórico
+            # Encontra melhor opção
+            melhor = min(resultados_parseados, key=lambda x: x.get('milhas', 999999))
+            
+            # Salva no histórico local
             historico_entry = {
                 'data_busca': datetime.now().strftime("%Y-%m-%d %H:%M"),
                 'origem': busca_origem_milhas,
@@ -972,16 +975,34 @@ Ordene do menor para o maior custo em milhas."""
                 'periodo': f"{data_inicio_str} - {data_fim_str}",
                 'opcoes': len(resultados_parseados),
                 'melhor_milhas': min([r.get('milhas', 999999) for r in resultados_parseados]),
+                'melhor_programa': melhor.get('programa', 'N/A'),
                 'resultados': resultados_parseados
             }
             st.session_state.historico_milhas.append(historico_entry)
+            
+            # Envia para o webhook (Google Sheets)
+            if WEBHOOK_MILHAS_URL and "SUBSTITUIR" not in WEBHOOK_MILHAS_URL:
+                try:
+                    payload_webhook = {
+                        "data_busca": historico_entry['data_busca'],
+                        "origem": historico_entry['origem'],
+                        "destino": historico_entry['destino'],
+                        "periodo": historico_entry['periodo'],
+                        "quantidade_opcoes": historico_entry['opcoes'],
+                        "melhor_milhas": historico_entry['melhor_milhas'],
+                        "melhor_programa": historico_entry['melhor_programa'],
+                        "resultados_json": json.dumps(resultados_parseados, ensure_ascii=False)
+                    }
+                    response = requests.post(WEBHOOK_MILHAS_URL, json=payload_webhook, timeout=10)
+                    if response.status_code == 200:
+                        st.toast("✅ Histórico salvo!")
+                except Exception as e:
+                    pass  # Falha silenciosa para não atrapalhar UX
             
             st.divider()
             
             # Melhor opção destacada
             if resultados_parseados:
-                melhor = min(resultados_parseados, key=lambda x: x.get('milhas', 999999))
-                
                 st.markdown("#### 🏆 Melhor Opção")
                 col1, col2, col3 = st.columns(3)
                 
@@ -1024,9 +1045,9 @@ Ordene do menor para o maior custo em milhas."""
     
     # Histórico de buscas
     if st.session_state.historico_milhas:
-        with st.expander(f"📜 Histórico de Buscas ({len(st.session_state.historico_milhas)})"):
+        with st.expander(f"📜 Histórico de Buscas desta Sessão ({len(st.session_state.historico_milhas)})"):
             for i, h in enumerate(reversed(st.session_state.historico_milhas[-10:])):  # Últimas 10
-                col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
                 with col1:
                     st.write(f"**{h['origem']} → {h['destino']}**")
                 with col2:
@@ -1034,13 +1055,19 @@ Ordene do menor para o maior custo em milhas."""
                 with col3:
                     st.write(f"{h['opcoes']} opções")
                 with col4:
-                    st.write(f"Melhor: {h['melhor_milhas']:,}")
+                    st.write(f"{h['melhor_milhas']:,} mi")
+                with col5:
+                    st.write(h.get('melhor_programa', 'N/A'))
                 st.caption(f"Busca em: {h['data_busca']}")
                 st.divider()
             
-            if st.button("🗑️ Limpar Histórico"):
+            if st.button("🗑️ Limpar Histórico da Sessão"):
                 st.session_state.historico_milhas = []
                 st.rerun()
+        
+        # Info sobre persistência
+        if "SUBSTITUIR" in WEBHOOK_MILHAS_URL:
+            st.info("💡 Configure o webhook no Make.com para salvar o histórico permanentemente. Veja as instruções no código.")
     
     st.divider()
     
