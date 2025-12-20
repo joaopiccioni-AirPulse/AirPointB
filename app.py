@@ -272,11 +272,24 @@ with tab1:
     
     col3, col4, col5 = st.columns(3)
     with col3:
-        data_voo = st.date_input("📅 Data", value=date.today() + timedelta(days=30), min_value=date.today() + timedelta(days=1))
+        data_inicio = st.date_input("📅 Data Inicial", value=date.today() + timedelta(days=30), min_value=date.today() + timedelta(days=1), key="data_ini")
     with col4:
-        tipo_voo = st.selectbox("✈️ Tipo", ["Todos", "Somente Diretos", "Com Conexão"])
+        data_fim = st.date_input("📅 Data Final", value=data_inicio, min_value=data_inicio, max_value=data_inicio + timedelta(days=30), key="data_fim", help="Máximo 30 dias de período")
     with col5:
+        tipo_voo = st.selectbox("✈️ Tipo", ["Todos", "Somente Diretos", "Com Conexão"])
+    
+    col6, col7 = st.columns(2)
+    with col6:
         adultos = st.number_input("👤 Adultos", min_value=1, max_value=9, value=1)
+    with col7:
+        # Calcula número de dias
+        num_dias = (data_fim - data_inicio).days + 1
+        st.info(f"📆 Período: **{num_dias} dia(s)** ({data_inicio.strftime('%d/%m')} a {data_fim.strftime('%d/%m')})")
+    
+    # Aviso de muitas buscas
+    total_buscas = len(origens if origens else ["GRU"]) * len(destinos if destinos else ["MIA"]) * num_dias
+    if total_buscas > 10:
+        st.warning(f"⚠️ Esta busca fará **{total_buscas} requisições**. Pode demorar alguns minutos.")
     
     if st.button("🔍 Buscar", type="primary", use_container_width=True):
         if not origens:
@@ -284,31 +297,50 @@ with tab1:
         if not destinos:
             destinos = ["MIA"]
         
+        # Gera lista de datas
+        datas_busca = []
+        data_atual = data_inicio
+        while data_atual <= data_fim:
+            datas_busca.append(data_atual)
+            data_atual += timedelta(days=1)
+        
         st.session_state.ultima_busca = {
             'origens': origens, 'destinos': destinos,
-            'data': data_voo.strftime("%Y-%m-%d"),
-            'data_display': data_voo.strftime("%d/%m/%Y"),
+            'data_inicio': data_inicio.strftime("%Y-%m-%d"),
+            'data_fim': data_fim.strftime("%Y-%m-%d"),
+            'datas': [d.strftime("%Y-%m-%d") for d in datas_busca],
+            'data_display': f"{data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}" if num_dias > 1 else data_inicio.strftime("%d/%m/%Y"),
             'paradas': tipo_voo
         }
         
         prog = st.progress(0)
+        status = st.empty()
         sucesso = 0
-        for i, orig in enumerate(origens):
-            for dest in destinos:
-                if orig != dest:
-                    try:
-                        params = {"origin": orig, "destination": dest, "date": data_voo.strftime("%Y-%m-%d"), "adults": adultos, "nonstop": "true" if tipo_voo == "Somente Diretos" else "false"}
-                        r = requests.get(WEBHOOK_URL, params=params, timeout=60)
-                        if r.status_code == 200:
-                            sucesso += 1
-                    except:
-                        pass
-            prog.progress((i + 1) / len(origens))
+        total = len(origens) * len(destinos) * len(datas_busca)
+        atual = 0
         
+        for data_busca in datas_busca:
+            for orig in origens:
+                for dest in destinos:
+                    if orig != dest:
+                        atual += 1
+                        status.text(f"Buscando {orig} → {dest} em {data_busca.strftime('%d/%m')}... ({atual}/{total})")
+                        try:
+                            params = {"origin": orig, "destination": dest, "date": data_busca.strftime("%Y-%m-%d"), "adults": adultos, "nonstop": "true" if tipo_voo == "Somente Diretos" else "false"}
+                            r = requests.get(WEBHOOK_URL, params=params, timeout=60)
+                            if r.status_code == 200:
+                                sucesso += 1
+                        except:
+                            pass
+                        prog.progress(atual / total)
+        
+        status.empty()
         if sucesso > 0:
-            st.success(f"✅ {sucesso} busca(s)!")
-            time.sleep(5)
+            st.success(f"✅ {sucesso} busca(s) realizada(s)!")
+            with st.spinner("Aguardando processamento..."):
+                time.sleep(5)
             st.cache_data.clear()
+            st.info("👆 Veja os resultados na aba **Resultados**")
 
 # TAB 2: RESULTADOS
 with tab2:
@@ -324,32 +356,74 @@ with tab2:
     df = load_flight_data()
     if df is not None and st.session_state.ultima_busca:
         b = st.session_state.ultima_busca
-        df_f = df[(df['Origem'].isin(b['origens'])) & (df['Destino'].isin(b['destinos'])) & (df['Data Voo'] == b['data'])].copy()
         
+        # Filtra por origem e destino
+        df_f = df[(df['Origem'].isin(b['origens'])) & (df['Destino'].isin(b['destinos']))].copy()
+        
+        # Filtra por período de datas
+        if 'datas' in b:
+            df_f = df_f[df_f['Data Voo'].isin(b['datas'])]
+        elif 'data' in b:
+            df_f = df_f[df_f['Data Voo'] == b['data']]
+        
+        # Filtra por tipo de paradas
         if b['paradas'] == "Somente Diretos":
             df_f = df_f[df_f['Paradas'] == 0]
         elif b['paradas'] == "Com Conexão":
             df_f = df_f[df_f['Paradas'] > 0]
         
         if len(df_f) > 0:
+            # Filtro adicional por data específica (se período)
+            if 'datas' in b and len(b['datas']) > 1:
+                datas_disponiveis = sorted(df_f['Data Voo'].unique())
+                data_selecionada = st.selectbox(
+                    "📅 Filtrar por data:",
+                    ["Todas"] + datas_disponiveis,
+                    key="filtro_data_resultado"
+                )
+                if data_selecionada != "Todas":
+                    df_f = df_f[df_f['Data Voo'] == data_selecionada]
+            
+            st.divider()
+            
+            # Melhores opções por classe
             for classe in df_f['Classe'].unique():
                 df_c = df_f[df_f['Classe'] == classe]
                 if len(df_c) > 0:
                     melhor = df_c.loc[df_c['Preço BRL'].idxmin()]
                     st.markdown(f"### {classe}")
-                    st.metric("💰 Menor", f"R$ {melhor['Preço BRL']:,.2f}")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("💰 Menor Preço", f"R$ {melhor['Preço BRL']:,.2f}")
+                    with col2:
+                        # Formata data do voo
+                        data_voo_str = melhor['Data Voo']
+                        try:
+                            data_voo_fmt = datetime.strptime(data_voo_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                        except:
+                            data_voo_fmt = data_voo_str
+                        st.metric("📅 Data", data_voo_fmt)
                     st.caption(f"{melhor['Companhia Nome']} {melhor.get('Num Voo', '')} | {format_stops(melhor['Paradas'])}")
             
             st.divider()
-            cols = [c for c in ['Origem', 'Destino', 'Companhia Nome', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Paradas'] if c in df_f.columns]
+            
+            # Tabela completa
+            cols = [c for c in ['Origem', 'Destino', 'Data Voo', 'Companhia Nome', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Paradas'] if c in df_f.columns]
             df_d = df_f[cols].copy()
+            
+            # Formata colunas
+            if 'Data Voo' in df_d.columns:
+                df_d['Data Voo'] = df_d['Data Voo'].apply(lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%d/%m") if x else x)
             df_d['Preço BRL'] = df_d['Preço BRL'].apply(lambda x: f"R$ {x:,.2f}")
             df_d['Duração'] = df_d['Duração'].apply(format_duration)
             df_d['Partida'] = df_d['Partida'].apply(format_time)
             df_d['Paradas'] = df_d['Paradas'].apply(format_stops)
-            st.dataframe(df_d, use_container_width=True, hide_index=True)
+            
+            # Ordena por preço
+            st.dataframe(df_d.sort_values('Preço BRL'), use_container_width=True, hide_index=True)
+            st.caption(f"Total: {len(df_f)} voos encontrados")
         else:
-            st.warning("Nenhum voo encontrado")
+            st.warning("Nenhum voo encontrado para o período selecionado")
     else:
         st.info("Faça uma busca primeiro")
 
@@ -359,10 +433,16 @@ with tab3:
     
     if st.session_state.ultima_busca:
         b = st.session_state.ultima_busca
-        st.success(f"📍 **{b['origens'][0]} → {b['destinos'][0]}** em **{b['data_display']}**")
-        orig_m, dest_m, data_m = b['origens'][0], b['destinos'][0], b['data_display']
+        st.success(f"📍 **{b['origens'][0]} → {b['destinos'][0]}** | Período: **{b['data_display']}**")
+        orig_m, dest_m = b['origens'][0], b['destinos'][0]
+        # Usa período se disponível
+        if 'data_inicio' in b and 'data_fim' in b:
+            data_m = f"{datetime.strptime(b['data_inicio'], '%Y-%m-%d').strftime('%d/%m/%Y')} a {datetime.strptime(b['data_fim'], '%Y-%m-%d').strftime('%d/%m/%Y')}"
+        else:
+            data_m = b['data_display']
     else:
-        orig_m, dest_m, data_m = "GRU", "MIA", (date.today() + timedelta(30)).strftime("%d/%m/%Y")
+        orig_m, dest_m = "GRU", "MIA"
+        data_m = (date.today() + timedelta(30)).strftime("%d/%m/%Y")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -377,7 +457,7 @@ with tab3:
     dest_nome = AIRPORTS.get(dest_m, {}).get("cidade", dest_m)
     
     prompt = f"""Busque award de {orig_m} ({orig_nome}) para {dest_m} ({dest_nome}).
-Data: {data_m}
+Período: {data_m}
 Cabines: {', '.join(cabines)}
 {"Somente Award" if award_only else ""}
 {"Somente diretos" if not inc_conex else ""}
