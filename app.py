@@ -136,27 +136,31 @@ def load_flight_data():
         
         num_cols = len(df.columns)
         st.session_state['sheet_cols'] = num_cols
+        st.session_state['sheet_original_cols'] = list(df.columns)
         
-        if num_cols >= 12:
-            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada', 'Paradas'][:num_cols]
-        elif num_cols >= 11:
-            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada', 'Paradas'][:num_cols]
-            df['Num Voo'] = ''
+        # Mapeamento baseado na estrutura real da planilha:
+        # Data Busca | Origem | Destino | Data Voo | Companhia | Classe | Preço BRL | Duração | NumeroVoo | Paradas | Conexao
+        if num_cols >= 11:
+            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Num Voo', 'Paradas', 'Conexao'][:num_cols]
         elif num_cols >= 10:
-            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Chegada'][:num_cols]
+            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Num Voo', 'Paradas'][:num_cols]
+            df['Conexao'] = ''
+        elif num_cols >= 9:
+            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração', 'Num Voo'][:num_cols]
+            df['Paradas'] = 0
+            df['Conexao'] = ''
+        elif num_cols >= 8:
+            df.columns = ['Data Busca', 'Origem', 'Destino', 'Data Voo', 'Companhia', 'Classe', 'Preço BRL', 'Duração'][:num_cols]
             df['Num Voo'] = ''
             df['Paradas'] = 0
+            df['Conexao'] = ''
         else:
-            # Tenta usar as colunas como estão
-            st.session_state['sheet_error'] = f"Planilha com {num_cols} colunas. Colunas encontradas: {list(df.columns)}"
-            # Renomeia o que for possível
-            col_names = list(df.columns)
+            st.session_state['sheet_error'] = f"Planilha com apenas {num_cols} colunas. Esperado pelo menos 8."
             return df
         
         df['Preço BRL'] = pd.to_numeric(df['Preço BRL'], errors='coerce')
         
         # Converte número de segmentos para número de paradas (conexões)
-        # Se a planilha tem o número de segmentos (ex: 2), paradas = segmentos - 1
         def parse_paradas(val):
             if pd.isna(val):
                 return 0
@@ -166,13 +170,12 @@ def load_flight_data():
                 import re
                 nums = re.findall(r'\d+', val_str)
                 if nums:
-                    return max(0, int(nums[0]) - 1)  # Segmentos - 1 = Paradas
+                    return max(0, int(nums[0]) - 1)
                 return 0
-            # Se for número direto, assume que é número de segmentos
             try:
                 num = int(float(val_str))
-                # Se o número for >= 1, assume que é contagem de segmentos
-                # Paradas = Segmentos - 1 (1 segmento = direto, 2 segmentos = 1 conexão)
+                # Se for >= 1, assume que é contagem de segmentos
+                # Paradas = Segmentos - 1
                 if num >= 1:
                     return num - 1
                 return 0
@@ -187,7 +190,6 @@ def load_flight_data():
             if pd.isna(date_str):
                 return None
             date_str = str(date_str).strip()
-            # Tenta diferentes formatos
             for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d']:
                 try:
                     return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
@@ -196,6 +198,18 @@ def load_flight_data():
             return date_str
         
         df['Data Voo'] = df['Data Voo'].apply(normalize_date)
+        
+        # Formata duração se necessário
+        def format_duration_data(d):
+            if pd.isna(d):
+                return ''
+            d_str = str(d)
+            # Se já está no formato PT11H35M, converte
+            if 'PT' in d_str:
+                return d_str.replace('PT', '').replace('H', 'h ').replace('M', 'min')
+            return d_str
+        
+        df['Duração'] = df['Duração'].apply(format_duration_data)
         
         st.session_state['sheet_error'] = None
         return df
@@ -622,16 +636,25 @@ with tab2:
         
         # Tabela completa
         st.markdown("### 📋 Todos os Voos")
-        cols = [c for c in ['Origem', 'Destino', 'Data Voo', 'Companhia Nome', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Partida', 'Paradas'] if c in df_f.columns]
+        
+        # Colunas disponíveis na nova estrutura
+        cols = [c for c in ['Origem', 'Destino', 'Data Voo', 'Companhia Nome', 'Num Voo', 'Classe', 'Preço BRL', 'Duração', 'Paradas', 'Conexao'] if c in df_f.columns]
         df_d = df_f[cols].copy()
         
         # Formata colunas
         if 'Data Voo' in df_d.columns:
-            df_d['Data Voo'] = df_d['Data Voo'].apply(lambda x: datetime.strptime(str(x), "%Y-%m-%d").strftime("%d/%m") if x else x)
-        df_d['Preço BRL'] = df_d['Preço BRL'].apply(lambda x: f"R$ {x:,.2f}" if pd.notna(x) else "N/A")
-        df_d['Duração'] = df_d['Duração'].apply(format_duration)
-        df_d['Partida'] = df_d['Partida'].apply(format_time)
-        df_d['Paradas'] = df_d['Paradas'].apply(format_stops)
+            df_d['Data Voo'] = df_d['Data Voo'].apply(lambda x: datetime.strptime(str(x), "%Y-%m-%d").strftime("%d/%m") if x and x != 'None' else x)
+        if 'Preço BRL' in df_d.columns:
+            df_d['Preço BRL'] = df_d['Preço BRL'].apply(lambda x: f"R$ {x:,.2f}" if pd.notna(x) else "N/A")
+        if 'Paradas' in df_d.columns:
+            df_d['Paradas'] = df_d['Paradas'].apply(format_stops)
+        
+        # Renomeia colunas para exibição mais clara
+        df_d = df_d.rename(columns={
+            'Companhia Nome': 'Companhia',
+            'Num Voo': 'Voo',
+            'Conexao': 'Via'
+        })
         
         st.dataframe(df_d, use_container_width=True, hide_index=True)
         st.caption(f"Total: {len(df_f)} voos encontrados")
