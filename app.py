@@ -154,8 +154,48 @@ def load_flight_data():
             return df
         
         df['Preço BRL'] = pd.to_numeric(df['Preço BRL'], errors='coerce')
-        df['Paradas'] = pd.to_numeric(df['Paradas'], errors='coerce').fillna(0).astype(int)
+        
+        # Converte número de segmentos para número de paradas (conexões)
+        # Se a planilha tem o número de segmentos (ex: 2), paradas = segmentos - 1
+        def parse_paradas(val):
+            if pd.isna(val):
+                return 0
+            val_str = str(val).strip()
+            # Se vier no formato "{{2-1}}" ou similar, extrai o primeiro número
+            if '{{' in val_str:
+                import re
+                nums = re.findall(r'\d+', val_str)
+                if nums:
+                    return max(0, int(nums[0]) - 1)  # Segmentos - 1 = Paradas
+                return 0
+            # Se for número direto, assume que é número de segmentos
+            try:
+                num = int(float(val_str))
+                # Se o número for >= 1, assume que é contagem de segmentos
+                # Paradas = Segmentos - 1 (1 segmento = direto, 2 segmentos = 1 conexão)
+                if num >= 1:
+                    return num - 1
+                return 0
+            except:
+                return 0
+        
+        df['Paradas'] = df['Paradas'].apply(parse_paradas)
         df['Companhia Nome'] = df['Companhia'].apply(get_airline_name)
+        
+        # Normaliza o formato de data para YYYY-MM-DD
+        def normalize_date(date_str):
+            if pd.isna(date_str):
+                return None
+            date_str = str(date_str).strip()
+            # Tenta diferentes formatos
+            for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d']:
+                try:
+                    return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+                except:
+                    continue
+            return date_str
+        
+        df['Data Voo'] = df['Data Voo'].apply(normalize_date)
         
         st.session_state['sheet_error'] = None
         return df
@@ -478,67 +518,85 @@ with tab2:
         st.warning("⚠️ Planilha vazia. Faça uma busca primeiro.")
         st.stop()
     
+    st.divider()
+    
+    # Opção de filtro
+    st.markdown("### 🎯 Filtros")
+    
+    col_f1, col_f2, col_f3 = st.columns(3)
+    
+    with col_f1:
+        # Origens disponíveis
+        origens_disponiveis = sorted(df['Origem'].unique().tolist())
+        filtro_origem = st.multiselect(
+            "Origem:",
+            origens_disponiveis,
+            default=b['origens'] if all(o in origens_disponiveis for o in b['origens']) else origens_disponiveis[:1],
+            key="filtro_orig_res"
+        )
+    
+    with col_f2:
+        # Destinos disponíveis
+        destinos_disponiveis = sorted(df['Destino'].unique().tolist())
+        filtro_destino = st.multiselect(
+            "Destino:",
+            destinos_disponiveis,
+            default=[d for d in b['destinos'] if d in destinos_disponiveis] or destinos_disponiveis[:1],
+            key="filtro_dest_res"
+        )
+    
+    with col_f3:
+        # Datas disponíveis
+        datas_disponiveis = sorted(df['Data Voo'].unique().tolist())
+        # Formata para exibição
+        datas_display = []
+        for d in datas_disponiveis:
+            try:
+                d_fmt = datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')
+                datas_display.append(f"{d} ({d_fmt})")
+            except:
+                datas_display.append(d)
+        
+        filtro_data = st.selectbox(
+            "Data do Voo:",
+            ["Todas"] + datas_disponiveis,
+            key="filtro_data_res"
+        )
+    
     # Aplica filtros
     df_f = df.copy()
     
-    # Filtro 1: Origem
-    df_f = df_f[df_f['Origem'].isin(b['origens'])]
-    if debug_mode:
-        st.write(f"Após filtro origem ({b['origens']}): {len(df_f)} linhas")
+    if filtro_origem:
+        df_f = df_f[df_f['Origem'].isin(filtro_origem)]
     
-    # Filtro 2: Destino
-    df_f = df_f[df_f['Destino'].isin(b['destinos'])]
-    if debug_mode:
-        st.write(f"Após filtro destino ({b['destinos']}): {len(df_f)} linhas")
+    if filtro_destino:
+        df_f = df_f[df_f['Destino'].isin(filtro_destino)]
     
-    # Filtro 3: Datas
-    if 'datas' in b and b['datas']:
-        df_f = df_f[df_f['Data Voo'].isin(b['datas'])]
-        if debug_mode:
-            st.write(f"Após filtro datas ({b['datas']}): {len(df_f)} linhas")
+    if filtro_data != "Todas":
+        df_f = df_f[df_f['Data Voo'] == filtro_data]
     
-    # Filtro 4: Paradas
-    if b.get('paradas') == "Somente Diretos":
+    # Filtro de paradas (se especificado na busca)
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        filtro_paradas = st.selectbox("Tipo de Voo:", ["Todos", "Somente Diretos", "Com Conexão"], key="filtro_paradas_res")
+    
+    if filtro_paradas == "Somente Diretos":
         df_f = df_f[df_f['Paradas'] == 0]
-        if debug_mode:
-            st.write(f"Após filtro diretos: {len(df_f)} linhas")
-    elif b.get('paradas') == "Com Conexão":
+    elif filtro_paradas == "Com Conexão":
         df_f = df_f[df_f['Paradas'] > 0]
-        if debug_mode:
-            st.write(f"Após filtro conexões: {len(df_f)} linhas")
+    
+    if debug_mode:
+        st.write(f"**Resultados após filtros:** {len(df_f)} voos")
     
     st.divider()
     
     if len(df_f) == 0:
-        st.warning("⚠️ Nenhum voo encontrado para os critérios selecionados.")
+        st.warning("⚠️ Nenhum voo encontrado para os filtros selecionados.")
         
-        # Sugestões
-        st.markdown("**Possíveis causas:**")
-        st.markdown("- A busca ainda não foi processada (aguarde alguns segundos e clique em 'Atualizar')")
-        st.markdown("- Os dados ainda não chegaram na planilha")
-        st.markdown("- Os filtros de origem/destino/data não correspondem aos dados")
-        
-        if debug_mode:
-            st.markdown("**Dados disponíveis na planilha:**")
-            st.write("Rotas disponíveis:")
-            if len(df) > 0:
-                rotas = df.groupby(['Origem', 'Destino', 'Data Voo']).size().reset_index(name='Voos')
-                st.dataframe(rotas)
+        st.markdown("**Dados disponíveis na planilha:**")
+        rotas = df.groupby(['Origem', 'Destino', 'Data Voo']).size().reset_index(name='Voos')
+        st.dataframe(rotas, use_container_width=True, hide_index=True)
     else:
-        # Filtro por data específica (se período)
-        if 'datas' in b and len(b['datas']) > 1:
-            datas_disponiveis = sorted(df_f['Data Voo'].unique().tolist())
-            if datas_disponiveis:
-                data_selecionada = st.selectbox(
-                    "📅 Filtrar por data:",
-                    ["Todas"] + datas_disponiveis,
-                    key="filtro_data_resultado"
-                )
-                if data_selecionada != "Todas":
-                    df_f = df_f[df_f['Data Voo'] == data_selecionada]
-        
-        st.divider()
-        
         # Melhores opções por classe
         st.markdown("### 🏆 Melhores Opções")
         for classe in df_f['Classe'].unique():
