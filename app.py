@@ -724,7 +724,7 @@ Cabines: {', '.join(cabines)}
 {"Somente diretos" if not inc_conex else ""}
 Programas: {', '.join(progs)}
 
-Tabela: Programa | Data | Nº Voo | Milhas | Classe | Companhia | Direto/Conexão | Assentos
+Tabela: Milhas | Programa | Data | Nº Voo | Classe | Companhia | Direto/Conexão | Assentos
 Ordene por milhas."""
 
     st.code(prompt)
