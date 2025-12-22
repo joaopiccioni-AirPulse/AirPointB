@@ -724,60 +724,155 @@ Cabines: {', '.join(cabines)}
 {"Somente diretos" if not inc_conex else ""}
 Programas: {', '.join(progs)}
 
-Tabela: Milhas | Programa | Data | Nº Voo | Classe | Companhia | Direto/Conexão | Assentos
+Tabela: Programa | Data | Nº Voo | Milhas | Classe | Companhia | Direto/Conexão | Assentos
 Ordene por milhas."""
 
     st.code(prompt)
     st.markdown('<a href="https://seats.aero/assistant" target="_blank"><button style="background:#FF6B6B;color:white;padding:10px 20px;border:none;border-radius:5px;width:100%">🚀 Abrir Seats.aero</button></a>', unsafe_allow_html=True)
     
     st.divider()
-    resultado = st.text_area("📋 Cole o resultado:", height=200)
+    resultado = st.text_area("📋 Cole o resultado do Seats.aero:", height=200)
     
     if st.button("🔍 Processar", type="primary", use_container_width=True) and resultado:
         res = parse_seats_aero_table(resultado)
         if res:
             st.session_state.resultados_milhas = res
-            st.success(f"✅ {len(res)} opções!")
+            st.success(f"✅ {len(res)} opções encontradas!")
             
+            # Cria DataFrame com resultados de milhas
             df_m = pd.DataFrame(res)
+            
+            # Adiciona custo estimado em R$
             if 'milhas' in df_m.columns:
-                df_m['Custo Est.'] = df_m.apply(lambda r: f"R$ {calcular_custo_milhas(r['milhas'], r.get('programa', '')):,.2f}", axis=1)
-            st.dataframe(df_m, use_container_width=True, hide_index=True)
+                df_m['custo_reais'] = df_m.apply(lambda r: calcular_custo_milhas(r['milhas'], r.get('programa', '')), axis=1)
+                df_m['Custo Est.'] = df_m['custo_reais'].apply(lambda x: f"R$ {x:,.2f}")
             
-            # Comparação
+            # Carrega dados de voos em dinheiro
             df_cash = load_flight_data()
-            if df_cash is not None and st.session_state.ultima_busca:
-                b = st.session_state.ultima_busca
-                df_r = df_cash[(df_cash['Origem'].isin(b['origens'])) & (df_cash['Destino'].isin(b['destinos']))]
-                if len(df_r) > 0:
-                    st.divider()
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("#### 💵 Dinheiro")
-                        st.metric("Menor", f"R$ {df_r['Preço BRL'].min():,.2f}")
-                    with col2:
-                        st.markdown("#### 🎫 Milhas")
-                        melhor = min(res, key=lambda x: x.get('milhas', 999999))
-                        custo = calcular_custo_milhas(melhor.get('milhas', 0), melhor.get('programa', ''))
-                        st.metric(melhor.get('programa', ''), f"{melhor.get('milhas', 0):,} mi", f"≈ R$ {custo:,.2f}")
-                    
-                    eco = df_r['Preço BRL'].min() - custo
-                    if eco > 0:
-                        st.success(f"✅ Milhas economizam **R$ {eco:,.2f}**")
-                    else:
-                        st.warning(f"💵 Dinheiro é **R$ {abs(eco):,.2f}** mais barato")
             
-            # Salva
+            # Tenta fazer match por número de voo
+            if df_cash is not None and 'num_voo' in df_m.columns and 'Num Voo' in df_cash.columns:
+                # Cria coluna de preço em dinheiro para o mesmo voo
+                def get_preco_dinheiro(row):
+                    num_voo = row.get('num_voo', '')
+                    classe = row.get('classe', '').upper()
+                    if not num_voo:
+                        return None
+                    # Busca o voo correspondente
+                    match = df_cash[
+                        (df_cash['Num Voo'].str.upper() == num_voo.upper()) & 
+                        (df_cash['Classe'].str.upper().str.contains(classe[:4] if classe else 'ECON', na=False))
+                    ]
+                    if len(match) > 0:
+                        return match['Preço BRL'].min()
+                    # Se não encontrou com classe, tenta só pelo voo
+                    match = df_cash[df_cash['Num Voo'].str.upper() == num_voo.upper()]
+                    if len(match) > 0:
+                        return match['Preço BRL'].min()
+                    return None
+                
+                df_m['preco_dinheiro'] = df_m.apply(get_preco_dinheiro, axis=1)
+                df_m['Preço R$'] = df_m['preco_dinheiro'].apply(lambda x: f"R$ {x:,.2f}" if pd.notna(x) else "-")
+                
+                # Calcula economia
+                def calc_economia(row):
+                    if pd.isna(row.get('preco_dinheiro')) or pd.isna(row.get('custo_reais')):
+                        return None
+                    return row['preco_dinheiro'] - row['custo_reais']
+                
+                df_m['economia'] = df_m.apply(calc_economia, axis=1)
+                df_m['Economia'] = df_m['economia'].apply(
+                    lambda x: f"✅ R$ {x:,.0f}" if pd.notna(x) and x > 0 else (f"❌ -R$ {abs(x):,.0f}" if pd.notna(x) else "-")
+                )
+            
+            st.divider()
+            
+            # Tabela principal com comparação
+            st.markdown("### 📊 Comparação Milhas vs Dinheiro")
+            
+            # Seleciona e renomeia colunas para exibição
+            cols_display = ['programa', 'data', 'num_voo', 'milhas', 'classe', 'companhia', 'Custo Est.']
+            if 'Preço R$' in df_m.columns:
+                cols_display.extend(['Preço R$', 'Economia'])
+            
+            cols_existentes = [c for c in cols_display if c in df_m.columns]
+            df_display = df_m[cols_existentes].copy()
+            
+            # Renomeia colunas
+            df_display = df_display.rename(columns={
+                'programa': 'Programa',
+                'data': 'Data',
+                'num_voo': 'Voo',
+                'milhas': 'Milhas',
+                'classe': 'Classe',
+                'companhia': 'Companhia'
+            })
+            
+            # Formata milhas
+            if 'Milhas' in df_display.columns:
+                df_display['Milhas'] = df_display['Milhas'].apply(lambda x: f"{x:,}")
+            
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            
+            # Resumo por programa
+            st.markdown("### 🏆 Melhor Opção por Programa")
+            
+            programas_unicos = df_m['programa'].unique() if 'programa' in df_m.columns else []
+            
+            for prog in programas_unicos:
+                df_prog = df_m[df_m['programa'] == prog]
+                if len(df_prog) > 0:
+                    melhor = df_prog.loc[df_prog['milhas'].idxmin()]
+                    
+                    with st.container():
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric(f"🎫 {prog}", f"{int(melhor['milhas']):,} mi")
+                        with col2:
+                            st.metric("Custo Est.", f"R$ {melhor.get('custo_reais', 0):,.0f}")
+                        with col3:
+                            preco_din = melhor.get('preco_dinheiro')
+                            st.metric("Preço R$", f"R$ {preco_din:,.0f}" if pd.notna(preco_din) else "N/D")
+                        with col4:
+                            eco = melhor.get('economia')
+                            if pd.notna(eco):
+                                if eco > 0:
+                                    st.metric("Economia", f"R$ {eco:,.0f}", delta=f"{(eco/preco_din*100):.0f}%" if pd.notna(preco_din) and preco_din > 0 else "")
+                                else:
+                                    st.metric("Diferença", f"-R$ {abs(eco):,.0f}", delta=f"-{(abs(eco)/preco_din*100):.0f}%" if pd.notna(preco_din) and preco_din > 0 else "", delta_color="inverse")
+                            else:
+                                st.metric("Economia", "N/D")
+                        
+                        st.caption(f"Voo: {melhor.get('num_voo', 'N/D')} | Classe: {melhor.get('classe', 'N/D')} | {melhor.get('companhia', '')}")
+                        st.divider()
+            
+            # Salva histórico
             try:
-                payload = {"data_busca": datetime.now().strftime("%Y-%m-%d %H:%M"), "origem": orig_m, "destino": dest_m, "periodo": data_m, "quantidade_opcoes": len(res), "melhor_milhas": min([r.get('milhas', 999999) for r in res]), "melhor_programa": min(res, key=lambda x: x.get('milhas', 999999)).get('programa', ''), "resultados_json": json.dumps(res, ensure_ascii=False)}
+                payload = {
+                    "data_busca": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "origem": orig_m,
+                    "destino": dest_m,
+                    "periodo": data_m,
+                    "quantidade_opcoes": len(res),
+                    "melhor_milhas": min([r.get('milhas', 999999) for r in res]),
+                    "melhor_programa": min(res, key=lambda x: x.get('milhas', 999999)).get('programa', ''),
+                    "resultados_json": json.dumps(res, ensure_ascii=False)
+                }
                 requests.post(WEBHOOK_MILHAS_URL, json=payload, timeout=10)
             except:
                 pass
         else:
-            st.warning("Não extraiu dados")
+            st.warning("Não foi possível extrair dados. Verifique o formato da tabela.")
     
-    with st.expander("📊 Custos Referência"):
-        st.dataframe(pd.DataFrame([{"Programa": k, "R$/1000mi": f"R$ {v['medio']:.2f}"} for k, v in CUSTOS_PROGRAMAS.items()]), hide_index=True)
+    with st.expander("📊 Custos de Referência por Programa"):
+        custos_df = pd.DataFrame([
+            {"Programa": k, "Mínimo": f"R$ {v['min']:.2f}", "Médio": f"R$ {v['medio']:.2f}", "Máximo": f"R$ {v['max']:.2f}"}
+            for k, v in CUSTOS_PROGRAMAS.items()
+        ])
+        st.dataframe(custos_df, hide_index=True, use_container_width=True)
+        st.caption("Valores em R$ por 1.000 milhas")
 
 # TAB 4: COMPARADOR
 with tab4:
