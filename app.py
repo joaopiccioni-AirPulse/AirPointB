@@ -160,29 +160,58 @@ def load_flight_data():
         
         df['Preço BRL'] = pd.to_numeric(df['Preço BRL'], errors='coerce')
         
-        # Converte número de segmentos para número de paradas (conexões)
-        def parse_paradas(val):
+        # Função para extrair valor de dentro de {{valor}}
+        def extract_value(val):
             if pd.isna(val):
-                return 0
+                return ''
             val_str = str(val).strip()
-            # Se vier no formato "{{2-1}}" ou similar, extrai o primeiro número
+            # Remove {{ e }} se existirem
+            if '{{' in val_str and '}}' in val_str:
+                import re
+                match = re.search(r'\{\{([^}]+)\}\}', val_str)
+                if match:
+                    return match.group(1)
+            return val_str
+        
+        # Extrai valores da coluna Conexao (remove {{}})
+        if 'Conexao' in df.columns:
+            df['Conexao'] = df['Conexao'].apply(extract_value)
+        
+        # Extrai número de segmentos e calcula paradas
+        def parse_paradas(row):
+            # Extrai o número de segmentos
+            paradas_val = row.get('Paradas', 0)
+            if pd.isna(paradas_val):
+                return 0
+            
+            val_str = str(paradas_val).strip()
+            
+            # Extrai número de dentro de {{}}
             if '{{' in val_str:
                 import re
-                nums = re.findall(r'\d+', val_str)
-                if nums:
-                    return max(0, int(nums[0]) - 1)
+                match = re.search(r'\{\{(\d+)\}\}', val_str)
+                if match:
+                    num_segmentos = int(match.group(1))
+                else:
+                    return 0
+            else:
+                try:
+                    num_segmentos = int(float(val_str))
+                except:
+                    return 0
+            
+            # Se tem coluna Conexao, verifica se conexão = destino (significa direto)
+            conexao = row.get('Conexao', '')
+            destino = row.get('Destino', '')
+            
+            if conexao and destino and str(conexao).strip().upper() == str(destino).strip().upper():
+                # Conexão igual ao destino = voo direto
                 return 0
-            try:
-                num = int(float(val_str))
-                # Se for >= 1, assume que é contagem de segmentos
-                # Paradas = Segmentos - 1
-                if num >= 1:
-                    return num - 1
-                return 0
-            except:
-                return 0
+            
+            # Paradas = Segmentos - 1
+            return max(0, num_segmentos - 1)
         
-        df['Paradas'] = df['Paradas'].apply(parse_paradas)
+        df['Paradas'] = df.apply(parse_paradas, axis=1)
         df['Companhia Nome'] = df['Companhia'].apply(get_airline_name)
         
         # Normaliza o formato de data para YYYY-MM-DD
