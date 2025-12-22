@@ -752,23 +752,35 @@ Ordene por milhas."""
             
             # Tenta fazer match por número de voo
             if df_cash is not None and 'num_voo' in df_m.columns and 'Num Voo' in df_cash.columns:
+                # Garante que a coluna Num Voo é string
+                df_cash['Num Voo'] = df_cash['Num Voo'].fillna('').astype(str)
+                df_cash['Classe'] = df_cash['Classe'].fillna('').astype(str)
+                
                 # Cria coluna de preço em dinheiro para o mesmo voo
                 def get_preco_dinheiro(row):
-                    num_voo = row.get('num_voo', '')
-                    classe = row.get('classe', '').upper()
+                    num_voo = str(row.get('num_voo', '') or '').strip()
+                    classe = str(row.get('classe', '') or '').upper().strip()
+                    
                     if not num_voo:
                         return None
-                    # Busca o voo correspondente
-                    match = df_cash[
-                        (df_cash['Num Voo'].str.upper() == num_voo.upper()) & 
-                        (df_cash['Classe'].str.upper().str.contains(classe[:4] if classe else 'ECON', na=False))
-                    ]
-                    if len(match) > 0:
-                        return match['Preço BRL'].min()
-                    # Se não encontrou com classe, tenta só pelo voo
-                    match = df_cash[df_cash['Num Voo'].str.upper() == num_voo.upper()]
-                    if len(match) > 0:
-                        return match['Preço BRL'].min()
+                    
+                    try:
+                        # Busca o voo correspondente
+                        mask_voo = df_cash['Num Voo'].str.upper().str.strip() == num_voo.upper()
+                        
+                        if classe:
+                            mask_classe = df_cash['Classe'].str.upper().str.contains(classe[:4], na=False)
+                            match = df_cash[mask_voo & mask_classe]
+                            if len(match) > 0:
+                                return match['Preço BRL'].min()
+                        
+                        # Se não encontrou com classe, tenta só pelo voo
+                        match = df_cash[mask_voo]
+                        if len(match) > 0:
+                            return match['Preço BRL'].min()
+                    except Exception as e:
+                        pass
+                    
                     return None
                 
                 df_m['preco_dinheiro'] = df_m.apply(get_preco_dinheiro, axis=1)
@@ -776,9 +788,11 @@ Ordene por milhas."""
                 
                 # Calcula economia
                 def calc_economia(row):
-                    if pd.isna(row.get('preco_dinheiro')) or pd.isna(row.get('custo_reais')):
+                    preco = row.get('preco_dinheiro')
+                    custo = row.get('custo_reais')
+                    if pd.isna(preco) or pd.isna(custo):
                         return None
-                    return row['preco_dinheiro'] - row['custo_reais']
+                    return preco - custo
                 
                 df_m['economia'] = df_m.apply(calc_economia, axis=1)
                 df_m['Economia'] = df_m['economia'].apply(
