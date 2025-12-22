@@ -274,6 +274,38 @@ def format_stops(s):
 
 def parse_seats_aero_table(text):
     results = []
+    
+    # Primeiro tenta o formato sem separadores (texto colado de tabela HTML)
+    # Padrão: Programa + Data + Voo + Milhas + Classe + Companhia + Paradas + Assentos
+    pattern_no_sep = r'(AAdvantage(?:\s*\(total\))?|Smiles|Azul|TudoAzul|LATAM Pass|LATAM|TAP|United|Delta|Iberia|Flying Blue)(\d{2}/\d{2}/\d{4})([A-Z]{2,3}\d{2,4}|[A-Z]{3}[–-][A-Z]{3}[–-][A-Z]{3})(\d{2,3}[.,]\d{3})(Economy|Business|First|Premium)([A-Za-z\s]+?)(Direto|\d+\s*conexão[^—N]*)(—|N/D)'
+    
+    matches = re.findall(pattern_no_sep, text, re.IGNORECASE)
+    
+    if matches:
+        for m in matches:
+            programa, data, voo, milhas, classe, companhia, paradas, assentos = m
+            try:
+                milhas_int = int(milhas.replace('.', '').replace(',', ''))
+            except:
+                continue
+            
+            if milhas_int < 1000:
+                continue
+                
+            results.append({
+                'programa': programa.replace(' (total)', '').strip(),
+                'data': data,
+                'num_voo': voo,
+                'milhas': milhas_int,
+                'classe': classe.capitalize(),
+                'companhia': companhia.strip(),
+                'paradas': paradas.strip()
+            })
+        
+        if results:
+            return results
+    
+    # Fallback: tenta o formato com separadores (| ou múltiplos espaços)
     lines = text.strip().split('\n')
     
     for line in lines:
@@ -287,8 +319,8 @@ def parse_seats_aero_table(text):
         if '|' in line:
             parts = [p.strip() for p in line.split('|')]
         else:
-            # Separa por 2+ espaços (formato tabular)
-            parts = re.split(r'\s{2,}', line)
+            # Separa por 2+ espaços ou tabs
+            parts = re.split(r'\s{2,}|\t', line)
         
         # Precisa ter pelo menos 4 colunas
         if len(parts) < 4:
@@ -296,44 +328,40 @@ def parse_seats_aero_table(text):
         
         result = {}
         
-        # Detecta o formato baseado no conteúdo
-        # Formato esperado: Programa | Data | Nº Voo | Milhas | Classe | Companhia | Direto/Conexão | Assentos
-        
         for i, part in enumerate(parts):
             part = part.strip()
             
-            # Programa (primeira coluna geralmente)
-            if i == 0 or any(prog.lower() in part.lower() for prog in ['AAdvantage', 'Smiles', 'Azul', 'TudoAzul', 'LATAM', 'TAP', 'Iberia', 'Avios', 'United', 'Delta', 'Flying Blue']):
-                for prog in ['American AAdvantage', 'AAdvantage', 'Smiles', 'Azul', 'TudoAzul', 'LATAM Pass', 'TAP Miles&Go', 'TAP', 'Iberia Plus', 'Avios', 'United MileagePlus', 'United', 'Delta SkyMiles', 'Delta', 'Flying Blue']:
-                    if prog.lower() in part.lower():
-                        result['programa'] = prog.replace('American ', '').replace(' Miles&Go', '').replace(' MileagePlus', '').replace(' SkyMiles', '').replace(' Plus', '')
-                        break
+            # Programa
+            for prog in ['AAdvantage', 'Smiles', 'Azul', 'TudoAzul', 'LATAM Pass', 'LATAM', 'TAP', 'Iberia', 'Avios', 'United', 'Delta', 'Flying Blue']:
+                if prog.lower() in part.lower():
+                    result['programa'] = prog
+                    break
             
-            # Data (formato DD/MM/YYYY ou similar)
+            # Data
             if re.match(r'^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}$', part):
                 result['data'] = part
             
-            # Número do Voo (formato AA123, LA4567, G31234, etc)
+            # Número do Voo
             if re.match(r'^[A-Z]{2}\d{1,4}$', part) or re.match(r'^[A-Z]\d{1,5}$', part):
                 result['num_voo'] = part
             
-            # Rota com conexão (formato GRU-MIA-SFO)
+            # Rota com conexão
             if re.match(r'^[A-Z]{3}[-–][A-Z]{3}[-–][A-Z]{3}$', part):
-                result['num_voo'] = part  # Guarda a rota como referência
+                result['num_voo'] = part
                 result['paradas'] = '1 conexão'
             
-            # Milhas (número com ponto de milhar, geralmente > 1000)
+            # Milhas (número com ponto de milhar)
             milhas_match = re.match(r'^(\d{1,3}[.\,]\d{3})$', part)
             if milhas_match:
                 try:
                     milhas_str = part.replace('.', '').replace(',', '')
                     milhas = int(milhas_str)
-                    if milhas >= 1000:  # Milhas são sempre >= 1000
+                    if milhas >= 1000:
                         result['milhas'] = milhas
                 except:
                     pass
             
-            # Milhas sem separador (5 ou 6 dígitos)
+            # Milhas sem separador
             if re.match(r'^\d{5,6}$', part):
                 try:
                     result['milhas'] = int(part)
@@ -357,7 +385,7 @@ def parse_seats_aero_table(text):
             elif 'conexão' in part.lower() or 'conexao' in part.lower():
                 result['paradas'] = part
         
-        # Só adiciona se tem milhas (campo obrigatório)
+        # Só adiciona se tem milhas
         if 'milhas' in result and result['milhas'] >= 1000:
             results.append(result)
     
@@ -768,8 +796,34 @@ Ordene por milhas."""
     st.divider()
     resultado = st.text_area("📋 Cole o resultado do Seats.aero:", height=200)
     
+    # Debug mode
+    debug_milhas = st.checkbox("🔧 Debug Parser", value=False)
+    
     if st.button("🔍 Processar", type="primary", use_container_width=True) and resultado:
+        
+        if debug_milhas:
+            st.markdown("### 🔧 Debug")
+            st.text(f"Tamanho do texto: {len(resultado)} caracteres")
+            st.text(f"Número de linhas: {len(resultado.split(chr(10)))}")
+            st.markdown("**Primeiras 5 linhas:**")
+            for i, line in enumerate(resultado.split('\n')[:5]):
+                st.code(f"[{i}] '{line}'")
+            
+            # Testa separação
+            st.markdown("**Teste de separação (linha 1):**")
+            if resultado.split('\n'):
+                first_line = resultado.split('\n')[0]
+                st.text(f"Por |: {first_line.split('|')}")
+                st.text(f"Por tabs: {first_line.split(chr(9))}")
+                st.text(f"Por 2+ espaços: {re.split(r'\\s{2,}', first_line)}")
+        
         res = parse_seats_aero_table(resultado)
+        
+        if debug_milhas:
+            st.markdown(f"**Resultados encontrados: {len(res)}**")
+            if res:
+                st.json(res[:3])  # Mostra os 3 primeiros
+        
         if res:
             st.session_state.resultados_milhas = res
             st.success(f"✅ {len(res)} opções encontradas!")
