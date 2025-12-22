@@ -274,58 +274,93 @@ def format_stops(s):
 
 def parse_seats_aero_table(text):
     results = []
-    for line in text.strip().split('\n'):
+    lines = text.strip().split('\n')
+    
+    for line in lines:
         line = line.strip()
-        if not line or 'Programa' in line or '---' in line:
+        
+        # Pula linhas vazias, cabeçalhos e separadores
+        if not line or 'Programa' in line or '---' in line or 'Combinação' in line or 'Rota detalhada' in line:
             continue
+        
+        # Tenta separar por | ou por múltiplos espaços
+        if '|' in line:
+            parts = [p.strip() for p in line.split('|')]
+        else:
+            # Separa por 2+ espaços (formato tabular)
+            parts = re.split(r'\s{2,}', line)
+        
+        # Precisa ter pelo menos 4 colunas
+        if len(parts) < 4:
+            continue
+        
         result = {}
         
-        # Milhas
-        m = re.search(r'(\d{1,3}[.,]\d{3}|\d{2,6})', line)
-        if m:
-            try:
-                result['milhas'] = int(m.group(1).replace('.', '').replace(',', ''))
-            except:
-                pass
+        # Detecta o formato baseado no conteúdo
+        # Formato esperado: Programa | Data | Nº Voo | Milhas | Classe | Companhia | Direto/Conexão | Assentos
         
-        # Programa
-        for prog in ['American AAdvantage', 'AAdvantage', 'Smiles', 'Azul', 'TudoAzul', 'LATAM Pass', 'TAP', 'Iberia Plus', 'Avios', 'United', 'Delta', 'Flying Blue']:
-            if prog.lower() in line.lower():
-                result['programa'] = prog
-                break
+        for i, part in enumerate(parts):
+            part = part.strip()
+            
+            # Programa (primeira coluna geralmente)
+            if i == 0 or any(prog.lower() in part.lower() for prog in ['AAdvantage', 'Smiles', 'Azul', 'TudoAzul', 'LATAM', 'TAP', 'Iberia', 'Avios', 'United', 'Delta', 'Flying Blue']):
+                for prog in ['American AAdvantage', 'AAdvantage', 'Smiles', 'Azul', 'TudoAzul', 'LATAM Pass', 'TAP Miles&Go', 'TAP', 'Iberia Plus', 'Avios', 'United MileagePlus', 'United', 'Delta SkyMiles', 'Delta', 'Flying Blue']:
+                    if prog.lower() in part.lower():
+                        result['programa'] = prog.replace('American ', '').replace(' Miles&Go', '').replace(' MileagePlus', '').replace(' SkyMiles', '').replace(' Plus', '')
+                        break
+            
+            # Data (formato DD/MM/YYYY ou similar)
+            if re.match(r'^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}$', part):
+                result['data'] = part
+            
+            # Número do Voo (formato AA123, LA4567, G31234, etc)
+            if re.match(r'^[A-Z]{2}\d{1,4}$', part) or re.match(r'^[A-Z]\d{1,5}$', part):
+                result['num_voo'] = part
+            
+            # Rota com conexão (formato GRU-MIA-SFO)
+            if re.match(r'^[A-Z]{3}[-–][A-Z]{3}[-–][A-Z]{3}$', part):
+                result['num_voo'] = part  # Guarda a rota como referência
+                result['paradas'] = '1 conexão'
+            
+            # Milhas (número com ponto de milhar, geralmente > 1000)
+            milhas_match = re.match(r'^(\d{1,3}[.\,]\d{3})$', part)
+            if milhas_match:
+                try:
+                    milhas_str = part.replace('.', '').replace(',', '')
+                    milhas = int(milhas_str)
+                    if milhas >= 1000:  # Milhas são sempre >= 1000
+                        result['milhas'] = milhas
+                except:
+                    pass
+            
+            # Milhas sem separador (5 ou 6 dígitos)
+            if re.match(r'^\d{5,6}$', part):
+                try:
+                    result['milhas'] = int(part)
+                except:
+                    pass
+            
+            # Classe
+            if part.lower() in ['economy', 'business', 'first', 'premium economy', 'premium']:
+                result['classe'] = part.capitalize()
+            
+            # Companhia
+            companhias = ['American Airlines', 'LATAM', 'Gol', 'Azul', 'Avianca', 'United', 'Delta', 'TAP', 'Iberia', 'British Airways', 'Air France', 'KLM']
+            for comp in companhias:
+                if comp.lower() in part.lower():
+                    result['companhia'] = comp
+                    break
+            
+            # Direto/Conexão
+            if 'direto' in part.lower():
+                result['paradas'] = 'Direto'
+            elif 'conexão' in part.lower() or 'conexao' in part.lower():
+                result['paradas'] = part
         
-        # Data
-        d = re.search(r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})', line)
-        if d:
-            result['data'] = d.group(1)
-        
-        # Voo
-        f = re.search(r'\b([A-Z]{2}\d{1,4})\b', line)
-        if f:
-            result['num_voo'] = f.group(1)
-        
-        # Classe
-        if re.search(r'\beconomy\b', line, re.I):
-            result['classe'] = 'Economy'
-        elif re.search(r'\bbusiness\b', line, re.I):
-            result['classe'] = 'Business'
-        elif re.search(r'\bfirst\b', line, re.I):
-            result['classe'] = 'First'
-        
-        # Companhia
-        for code, name in AIRLINES.items():
-            if name.lower() in line.lower():
-                result['companhia'] = name
-                break
-        
-        # Paradas
-        if re.search(r'\bdireto\b', line, re.I):
-            result['paradas'] = 'Direto'
-        elif re.search(r'\d+\s*parada', line, re.I):
-            result['paradas'] = '1+ parada'
-        
-        if 'milhas' in result:
+        # Só adiciona se tem milhas (campo obrigatório)
+        if 'milhas' in result and result['milhas'] >= 1000:
             results.append(result)
+    
     return results
 
 # Session state
