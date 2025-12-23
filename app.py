@@ -15,22 +15,151 @@ SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:
 WEBHOOK_MILHAS_URL = "https://hook.us2.make.com/absqlpqrivvd323erxmetebauv5uy3ly"
 SHEET_MILHAS_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Historico_Milhas"
 
-# Custos de referência R$/1000 milhas
+# Custos de referência R$/1000 milhas (custo médio de aquisição)
 CUSTOS_PROGRAMAS = {
-    "Azul": {"min": 12.0, "max": 15.75, "medio": 13.88},
-    "TudoAzul": {"min": 12.0, "max": 15.75, "medio": 13.88},
-    "Smiles": {"min": 15.0, "max": 15.0, "medio": 15.0},
-    "AAdvantage": {"min": 90.0, "max": 90.0, "medio": 90.0},
-    "American AAdvantage": {"min": 90.0, "max": 90.0, "medio": 90.0},
-    "Avios": {"min": 50.0, "max": 70.0, "medio": 60.0},
-    "Iberia Plus": {"min": 50.0, "max": 70.0, "medio": 60.0},
-    "TAP": {"min": 35.0, "max": 35.0, "medio": 35.0},
-    "TAP Miles&Go": {"min": 35.0, "max": 35.0, "medio": 35.0},
-    "LATAM Pass": {"min": 20.0, "max": 25.0, "medio": 22.5},
-    "United": {"min": 30.0, "max": 40.0, "medio": 35.0},
-    "Delta": {"min": 25.0, "max": 35.0, "medio": 30.0},
-    "Flying Blue": {"min": 25.0, "max": 35.0, "medio": 30.0},
+    "Azul": {"min": 18.0, "medio": 22.0, "max": 28.0},
+    "TudoAzul": {"min": 18.0, "medio": 22.0, "max": 28.0},
+    "Smiles": {"min": 14.0, "medio": 18.0, "max": 23.0},
+    "LATAM Pass": {"min": 24.0, "medio": 28.0, "max": 35.0},
+    "AAdvantage": {"min": 75.0, "medio": 90.0, "max": 110.0},
+    "American AAdvantage": {"min": 75.0, "medio": 90.0, "max": 110.0},
+    "Iberia": {"min": 50.0, "medio": 60.0, "max": 75.0},
+    "Iberia Plus": {"min": 50.0, "medio": 60.0, "max": 75.0},
+    "Avios": {"min": 50.0, "medio": 60.0, "max": 75.0},
+    "TAP": {"min": 28.0, "medio": 35.0, "max": 45.0},
+    "TAP Miles&Go": {"min": 28.0, "medio": 35.0, "max": 45.0},
+    "United": {"min": 28.0, "medio": 35.0, "max": 45.0},
+    "Delta": {"min": 22.0, "medio": 30.0, "max": 40.0},
+    "Flying Blue": {"min": 22.0, "medio": 30.0, "max": 40.0},
+    "Livelo": {"min": 16.0, "medio": 20.0, "max": 25.0},
+    "Esfera": {"min": 14.0, "medio": 18.0, "max": 22.0},
 }
+
+# Alianças aéreas
+ALIANCAS = {
+    "Star Alliance": {
+        "membros": ["United", "LATAM", "TAP", "Avianca", "Copa", "Air Canada", "Lufthansa", "Swiss", "Turkish"],
+        "programas": ["United MileagePlus", "LATAM Pass", "TAP Miles&Go", "Lifemiles"]
+    },
+    "Oneworld": {
+        "membros": ["American Airlines", "British Airways", "Iberia", "Qatar", "Finnair", "Japan Airlines", "Cathay Pacific"],
+        "programas": ["AAdvantage", "Avios", "Iberia Plus", "Qatar Privilege Club"]
+    },
+    "SkyTeam": {
+        "membros": ["Delta", "Air France", "KLM", "Aeromexico", "Korean Air", "Aerolineas Argentinas"],
+        "programas": ["Delta SkyMiles", "Flying Blue"]
+    }
+}
+
+# Parcerias entre programas e cias aéreas (quais cias cada programa pode emitir)
+PARCERIAS_PROGRAMAS = {
+    "AAdvantage": {
+        "alianca": "Oneworld",
+        "cias_diretas": ["American Airlines"],
+        "cias_parceiras": ["British Airways", "Iberia", "Qatar", "LATAM", "Gol", "Finnair", "Japan Airlines", "Cathay Pacific"],
+        "observacao": "Tabela fixa para parceiros. Melhor custo-benefício em Business/First para parceiros."
+    },
+    "Smiles": {
+        "alianca": None,
+        "cias_diretas": ["Gol"],
+        "cias_parceiras": ["American Airlines", "Delta", "Air France", "KLM", "TAP", "Aeromexico", "Copa", "Emirates"],
+        "observacao": "Programa independente com muitos parceiros. Custo de milhas baixo, bom para voos domésticos."
+    },
+    "Azul": {
+        "alianca": None,
+        "cias_diretas": ["Azul"],
+        "cias_parceiras": ["United", "TAP", "JetBlue", "Lufthansa"],
+        "observacao": "Programa TudoAzul. Portal de pontos com boas promoções."
+    },
+    "TudoAzul": {
+        "alianca": None,
+        "cias_diretas": ["Azul"],
+        "cias_parceiras": ["United", "TAP", "JetBlue", "Lufthansa"],
+        "observacao": "Mesmo que Azul."
+    },
+    "LATAM Pass": {
+        "alianca": "Oneworld",
+        "cias_diretas": ["LATAM"],
+        "cias_parceiras": ["American Airlines", "British Airways", "Iberia", "Qatar", "Delta"],
+        "observacao": "Saiu da Oneworld mas mantém parcerias. Pontos via Livelo/Esfera."
+    },
+    "TAP": {
+        "alianca": "Star Alliance",
+        "cias_diretas": ["TAP Portugal"],
+        "cias_parceiras": ["United", "Lufthansa", "Swiss", "Air Canada", "Avianca"],
+        "observacao": "Bom para Europa via Lisboa. Transferência de Livelo."
+    },
+    "Iberia": {
+        "alianca": "Oneworld",
+        "cias_diretas": ["Iberia"],
+        "cias_parceiras": ["American Airlines", "British Airways", "LATAM", "Finnair"],
+        "observacao": "Tabela fixa excelente. Sweet spots para América do Sul."
+    },
+    "United": {
+        "alianca": "Star Alliance",
+        "cias_diretas": ["United"],
+        "cias_parceiras": ["LATAM", "TAP", "Lufthansa", "Swiss", "Air Canada", "Avianca", "Copa", "Azul"],
+        "observacao": "Tabela dinâmica. Bom para parceiros Star Alliance."
+    },
+    "Flying Blue": {
+        "alianca": "SkyTeam",
+        "cias_diretas": ["Air France", "KLM"],
+        "cias_parceiras": ["Delta", "Aeromexico", "Korean Air", "Gol"],
+        "observacao": "Promoções mensais Promo Rewards."
+    },
+    "Delta": {
+        "alianca": "SkyTeam",
+        "cias_diretas": ["Delta"],
+        "cias_parceiras": ["Air France", "KLM", "Aeromexico", "LATAM", "Gol"],
+        "observacao": "Tabela dinâmica. Parceria com LATAM."
+    },
+    "Avios": {
+        "alianca": "Oneworld",
+        "cias_diretas": ["British Airways"],
+        "cias_parceiras": ["American Airlines", "Iberia", "Qatar", "Finnair", "Japan Airlines"],
+        "observacao": "Mesmo que British Airways Executive Club."
+    }
+}
+
+# Mapeamento de cia aérea para programas que podem emitir
+def get_programas_para_cia(cia_aerea):
+    """Retorna lista de programas que podem emitir passagens na cia aérea"""
+    programas = []
+    for prog, info in PARCERIAS_PROGRAMAS.items():
+        if cia_aerea in info.get('cias_diretas', []) or cia_aerea in info.get('cias_parceiras', []):
+            programas.append(prog)
+    return programas
+
+def calcular_equivalencia_programas(milhas_original, programa_original):
+    """
+    Dado um valor em milhas de um programa, calcula quanto custaria
+    e quantas milhas seriam equivalentes em outros programas
+    """
+    custo_original = CUSTOS_PROGRAMAS.get(programa_original, {})
+    if not custo_original:
+        return []
+    
+    custo_total = milhas_original * custo_original.get('medio', 30) / 1000
+    
+    equivalencias = []
+    for prog, custos in CUSTOS_PROGRAMAS.items():
+        if prog == programa_original or prog in ['Livelo', 'Esfera']:
+            continue
+        
+        # Quantas milhas desse programa equivalem ao mesmo custo?
+        milhas_equiv = (custo_total / custos['medio']) * 1000
+        
+        equivalencias.append({
+            'programa': prog,
+            'custo_por_mil': custos['medio'],
+            'milhas_equivalentes': round(milhas_equiv),
+            'custo_total': custo_total
+        })
+    
+    # Ordena por milhas equivalentes (menor = mais caro o programa)
+    equivalencias.sort(key=lambda x: x['milhas_equivalentes'])
+    
+    return equivalencias
 
 AIRLINES = {
     "LA": "LATAM", "JJ": "LATAM Brasil", "G3": "Gol", "AD": "Azul",
@@ -891,10 +1020,10 @@ Ordene por milhas."""
             st.divider()
             
             # Tabela principal com comparação
-            st.markdown("### 📊 Comparação Milhas vs Dinheiro")
+            st.markdown("### 📊 Resultados por Voo")
             
             # Seleciona e renomeia colunas para exibição
-            cols_display = ['programa', 'data', 'num_voo', 'milhas', 'classe', 'companhia', 'Custo Est.']
+            cols_display = ['programa', 'data', 'num_voo', 'milhas', 'classe', 'companhia', 'paradas', 'Custo Est.']
             if 'Preço R$' in df_m.columns:
                 cols_display.extend(['Preço R$', 'Economia'])
             
@@ -908,7 +1037,8 @@ Ordene por milhas."""
                 'num_voo': 'Voo',
                 'milhas': 'Milhas',
                 'classe': 'Classe',
-                'companhia': 'Companhia'
+                'companhia': 'Companhia',
+                'paradas': 'Paradas'
             })
             
             # Formata milhas
@@ -919,37 +1049,123 @@ Ordene por milhas."""
             
             st.divider()
             
-            # Resumo por programa
-            st.markdown("### 🏆 Melhor Opção por Programa")
+            # =====================================================
+            # NOVA SEÇÃO: Análise de Equivalência entre Programas
+            # =====================================================
+            st.markdown("### 💡 Análise de Equivalência entre Programas")
             
-            programas_unicos = df_m['programa'].unique() if 'programa' in df_m.columns else []
+            # Agrupa por voo único para análise
+            voos_unicos = df_m.groupby(['num_voo', 'data', 'classe']).apply(
+                lambda x: x.to_dict('records')
+            ).to_dict() if 'num_voo' in df_m.columns else {}
             
-            for prog in programas_unicos:
-                df_prog = df_m[df_m['programa'] == prog]
-                if len(df_prog) > 0:
-                    melhor = df_prog.loc[df_prog['milhas'].idxmin()]
+            # Para cada voo, mostra a análise
+            for (voo, data_voo, classe), opcoes in voos_unicos.items():
+                if not opcoes:
+                    continue
+                
+                # Pega a primeira opção como referência
+                ref = opcoes[0]
+                cia = ref.get('companhia', 'N/D')
+                paradas = ref.get('paradas', '')
+                
+                with st.expander(f"✈️ **{voo}** - {cia} | {data_voo} | {classe} | {paradas}", expanded=True):
                     
-                    with st.container():
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric(f"🎫 {prog}", f"{int(melhor['milhas']):,} mi")
-                        with col2:
-                            st.metric("Custo Est.", f"R$ {melhor.get('custo_reais', 0):,.0f}")
-                        with col3:
-                            preco_din = melhor.get('preco_dinheiro')
-                            st.metric("Preço R$", f"R$ {preco_din:,.0f}" if pd.notna(preco_din) else "N/D")
-                        with col4:
-                            eco = melhor.get('economia')
-                            if pd.notna(eco):
-                                if eco > 0:
-                                    st.metric("Economia", f"R$ {eco:,.0f}", delta=f"{(eco/preco_din*100):.0f}%" if pd.notna(preco_din) and preco_din > 0 else "")
-                                else:
-                                    st.metric("Diferença", f"-R$ {abs(eco):,.0f}", delta=f"-{(abs(eco)/preco_din*100):.0f}%" if pd.notna(preco_din) and preco_din > 0 else "", delta_color="inverse")
-                            else:
-                                st.metric("Economia", "N/D")
+                    # Mostra todas as opções disponíveis para esse voo
+                    st.markdown("#### 🎯 Opções Disponíveis (do Seats.aero)")
+                    
+                    cols = st.columns(len(opcoes)) if len(opcoes) <= 4 else st.columns(4)
+                    for i, opt in enumerate(opcoes[:4]):
+                        with cols[i % 4]:
+                            prog = opt.get('programa', 'N/D')
+                            milhas = opt.get('milhas', 0)
+                            custo = calcular_custo_milhas(milhas, prog)
+                            custo_mil = CUSTOS_PROGRAMAS.get(prog, {}).get('medio', 0)
+                            
+                            st.metric(
+                                label=f"🎫 {prog}",
+                                value=f"{milhas:,} mi",
+                                delta=f"R$ {custo:,.0f} (R${custo_mil}/mil)"
+                            )
+                    
+                    # Pega a melhor opção (menor custo em R$)
+                    melhor_opcao = min(opcoes, key=lambda x: calcular_custo_milhas(x.get('milhas', 999999), x.get('programa', '')))
+                    milhas_ref = melhor_opcao.get('milhas', 0)
+                    programa_ref = melhor_opcao.get('programa', '')
+                    custo_ref = calcular_custo_milhas(milhas_ref, programa_ref)
+                    
+                    st.markdown(f"**✅ Melhor opção: {programa_ref}** com {milhas_ref:,} milhas = **R$ {custo_ref:,.0f}**")
+                    
+                    st.divider()
+                    
+                    # Equivalência: quanto seria em outros programas para o mesmo custo?
+                    st.markdown("#### 📊 Equivalência em Outros Programas")
+                    st.caption(f"Para gastar os mesmos **R$ {custo_ref:,.0f}**, quantas milhas você precisaria em cada programa?")
+                    
+                    equivalencias = calcular_equivalencia_programas(milhas_ref, programa_ref)
+                    
+                    # Filtra apenas programas que podem emitir essa cia
+                    programas_possiveis = get_programas_para_cia(cia)
+                    
+                    # Monta tabela de equivalência
+                    equiv_data = []
+                    for eq in equivalencias:
+                        prog = eq['programa']
+                        milhas_eq = eq['milhas_equivalentes']
+                        custo_mil = eq['custo_por_mil']
                         
-                        st.caption(f"Voo: {melhor.get('num_voo', 'N/D')} | Classe: {melhor.get('classe', 'N/D')} | {melhor.get('companhia', '')}")
-                        st.divider()
+                        # Verifica se esse programa pode emitir nessa cia
+                        pode_emitir = prog in programas_possiveis or any(prog in p for p in programas_possiveis)
+                        
+                        # Verifica se está disponível no Seats.aero
+                        disponivel = any(o.get('programa', '').lower() == prog.lower() for o in opcoes)
+                        milhas_real = next((o.get('milhas', 0) for o in opcoes if o.get('programa', '').lower() == prog.lower()), None)
+                        
+                        # Calcula se vale a pena
+                        if milhas_real:
+                            custo_real = calcular_custo_milhas(milhas_real, prog)
+                            diff = custo_real - custo_ref
+                            diff_pct = (diff / custo_ref * 100) if custo_ref > 0 else 0
+                            veredito = "✅ DISPONÍVEL" if diff <= 0 else f"⚠️ +R$ {diff:,.0f}"
+                        else:
+                            milhas_real = "-"
+                            custo_real = "-"
+                            diff_pct = 0
+                            veredito = "🔍 Verificar" if pode_emitir else "❌ Não emite"
+                        
+                        equiv_data.append({
+                            'Programa': prog,
+                            'R$/mil': f"R$ {custo_mil:.0f}",
+                            'Milhas Equiv.': f"{milhas_eq:,}",
+                            'Milhas Real': f"{milhas_real:,}" if isinstance(milhas_real, int) else milhas_real,
+                            'Status': veredito
+                        })
+                    
+                    df_equiv = pd.DataFrame(equiv_data)
+                    st.dataframe(df_equiv, use_container_width=True, hide_index=True)
+                    
+                    # Dica estratégica
+                    st.markdown("---")
+                    st.markdown("**💡 Dica Estratégica:**")
+                    
+                    # Encontra o programa mais barato disponível
+                    opcoes_ordenadas = sorted(opcoes, key=lambda x: calcular_custo_milhas(x.get('milhas', 999999), x.get('programa', '')))
+                    melhor = opcoes_ordenadas[0]
+                    melhor_prog = melhor.get('programa', '')
+                    melhor_milhas = melhor.get('milhas', 0)
+                    melhor_custo = calcular_custo_milhas(melhor_milhas, melhor_prog)
+                    
+                    if len(opcoes_ordenadas) > 1:
+                        segundo = opcoes_ordenadas[1]
+                        segundo_prog = segundo.get('programa', '')
+                        segundo_custo = calcular_custo_milhas(segundo.get('milhas', 0), segundo_prog)
+                        economia = segundo_custo - melhor_custo
+                        
+                        st.success(f"Emitir pelo **{melhor_prog}** economiza **R$ {economia:,.0f}** comparado ao {segundo_prog}!")
+                    else:
+                        st.info(f"Única opção disponível: **{melhor_prog}** por R$ {melhor_custo:,.0f}")
+            
+            st.divider()
             
             # Salva histórico
             try:
